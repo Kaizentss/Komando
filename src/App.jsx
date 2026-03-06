@@ -261,133 +261,125 @@ function SuperAdminConsole({ onExit }) {
   );
 }
 
-// ─── Super Admin Login ────────────────────────────────────────────────────────
-function SuperAdminLogin({ onLogin, onBack }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async () => {
-    setLoading(true); setError('');
-    try {
-      const res = await fetch(`${API_URL}/api/superadmin/login`, {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ username, password })
-      });
-      if (res.ok) { onLogin(); }
-      else setError('Invalid credentials');
-    } catch { setError('Connection error'); }
-    setLoading(false);
-  };
-
-  return (
-    <div className="kf-login">
-      <div className="kf-login-box">
-        <div className="kf-login-header"><Shield size={40}/><h1>Super Admin</h1><p>Komando Console</p></div>
-        <div className="kf-form-group"><label>Username</label><input value={username} onChange={e=>setUsername(e.target.value)} autoFocus/></div>
-        <div className="kf-form-group"><label>Password</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()}/></div>
-        {error && <div className="kf-error"><AlertCircle size={16}/>{error}</div>}
-        <button className="kf-btn primary full" onClick={handleLogin} disabled={loading}>{loading?<Loader2 size={16} className="spin"/>:<Lock size={16}/>}Login</button>
-        <button className="kf-btn secondary full" style={{marginTop:8}} onClick={onBack}><ArrowLeft size={16}/>Back</button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Company Selector (login screen) ─────────────────────────────────────────
-function CompanySelector({ onSelectCompany, onSuperAdmin }) {
+// ─── Unified Login Screen ─────────────────────────────────────────────────────
+// Single screen: shows Super Admin + all company users in one flat list.
+// Super Admin uses username+password; company users use PIN.
+function UnifiedLogin({ onLoginUser, onLoginSuperAdmin }) {
   const [companies, setCompanies] = useState([]);
+  const [companyUsers, setCompanyUsers] = useState([]); // [{user, company}]
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(null); // {type:'superadmin'} | {type:'user', user, company}
+  const [pin, setPin] = useState('');
+  const [saUsername, setSaUsername] = useState('');
+  const [saPassword, setSaPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loggingIn, setLoggingIn] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/companies`)
-      .then(r => r.json()).then(setCompanies).catch(()=>{}).finally(()=>setLoading(false));
+    const load = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/companies`);
+        const cos = res.ok ? await res.json() : [];
+        setCompanies(cos);
+        // Load users for each company
+        const allUsers = [];
+        await Promise.all(cos.map(async c => {
+          try {
+            const r = await fetch(`${API_URL}/api/company/${c.id}/data/users`);
+            if (r.ok) {
+              const d = await r.json();
+              (d.value || []).forEach(u => allUsers.push({ user: u, company: c }));
+            }
+          } catch {}
+        }));
+        setCompanyUsers(allUsers);
+      } catch {}
+      setLoading(false);
+    };
+    load();
   }, []);
 
-  const filtered = companies.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
+  const handleSelectUser = (entry) => { setSelected(entry); setPin(''); setSaUsername(''); setSaPassword(''); setError(''); };
+
+  const handleLogin = async () => {
+    if (!selected) return;
+    setLoggingIn(true); setError('');
+    if (selected.type === 'superadmin') {
+      try {
+        const res = await fetch(`${API_URL}/api/superadmin/login`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ username: saUsername, password: saPassword })
+        });
+        if (res.ok) { onLoginSuperAdmin(); }
+        else { setError('Invalid credentials'); }
+      } catch { setError('Connection error'); }
+    } else {
+      if (selected.user.pin === pin) { onLoginUser(selected.user, selected.company); }
+      else { setError('Incorrect PIN'); setPin(''); }
+    }
+    setLoggingIn(false);
+  };
+
+  const isSA = selected?.type === 'superadmin';
 
   return (
     <div className="kf-login">
       <div className="kf-login-box">
         <div className="kf-login-header"><CircleDot size={40}/><h1>Komando</h1><p>Shop Management</p></div>
-        {loading ? <div className="kf-loading" style={{padding:40}}><Loader2 size={32} className="spin"/></div> : companies.length === 0 ? (
-          <div style={{textAlign:'center',padding:'20px 0'}}>
-            <Building2 size={40} style={{color:'var(--text-dim)',marginBottom:12}}/>
-            <p style={{color:'var(--text-dim)'}}>No companies configured yet.</p>
-          </div>
-        ) : (
+
+        {!selected ? (
           <>
-            {companies.length > 4 && (
-              <div className="kf-search" style={{marginBottom:12}}>
-                <Search size={16}/><input placeholder="Search companies..." value={search} onChange={e=>setSearch(e.target.value)}/>
-              </div>
-            )}
-            <div className="kf-login-users">
-              <h3>Select Your Company</h3>
-              {filtered.map(c => (
-                <button key={c.id} className="kf-login-user" onClick={() => onSelectCompany(c)}>
-                  <div className="kf-sa-co-icon sm"><Building2 size={18}/></div>
-                  <div><div className="kf-name">{c.name}</div></div>
+            {loading ? <div style={{textAlign:'center',padding:24}}><Loader2 size={28} className="spin"/></div> : (
+              <div className="kf-login-users">
+                {/* Super Admin entry */}
+                <button className="kf-login-user kf-login-sa" onClick={()=>setSelected({type:'superadmin'})}>
+                  <div className="kf-avatar lg sa"><Shield size={18}/></div>
+                  <div><div className="kf-name">Super Admin</div><div className="kf-sub">System Administrator</div></div>
                   <ChevronRight size={20}/>
                 </button>
-              ))}
-            </div>
-          </>
-        )}
-        <button className="kf-sa-link" onClick={onSuperAdmin}><Shield size={13}/>Super Admin</button>
-      </div>
-    </div>
-  );
-}
 
-// ─── User Login (after company selected) ─────────────────────────────────────
-function UserLogin({ company, users, onLogin, onBack }) {
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [pin, setPin] = useState('');
-  const [error, setError] = useState('');
+                {companyUsers.length > 0 && <div className="kf-login-divider">Company Users</div>}
 
-  const handleLogin = () => {
-    if (!selectedUser) return;
-    if (selectedUser.pin === pin) { onLogin(selectedUser); }
-    else { setError('Incorrect PIN'); setPin(''); }
-  };
-
-  return (
-    <div className="kf-login">
-      <div className="kf-login-box">
-        <div className="kf-login-header">
-          <CircleDot size={36}/>
-          <h1>{company.name}</h1>
-          <p>Select your account</p>
-        </div>
-        {!selectedUser ? (
-          <>
-            <div className="kf-login-users">
-              {users.length === 0 ? <p style={{color:'var(--text-dim)',textAlign:'center'}}>No users found.</p> :
-                users.map(u => (
-                  <button key={u.id} className="kf-login-user" onClick={() => setSelectedUser(u)}>
-                    <div className="kf-avatar lg">{u.name.charAt(0)}</div>
-                    <div><div className="kf-name">{u.name}</div><div className="kf-sub">{u.role.replace('_',' ')}</div></div>
+                {companyUsers.map(({user, company}, i) => (
+                  <button key={`${company.id}-${user.id}`} className="kf-login-user" onClick={()=>handleSelectUser({type:'user', user, company})}>
+                    <div className="kf-avatar lg">{user.name.charAt(0)}</div>
+                    <div>
+                      <div className="kf-name">{user.name}</div>
+                      <div className="kf-sub">{user.role.replace('_',' ')} · {company.name}</div>
+                    </div>
                     <ChevronRight size={20}/>
                   </button>
-                ))
-              }
-            </div>
-            <button className="kf-back-btn" style={{marginTop:12}} onClick={onBack}><ArrowLeft size={16}/>Back to Companies</button>
+                ))}
+
+                {companyUsers.length === 0 && !loading && (
+                  <div style={{textAlign:'center',padding:'12px 0',color:'var(--text-dim)',fontSize:'0.85rem'}}>No company users yet.</div>
+                )}
+              </div>
+            )}
           </>
         ) : (
           <div className="kf-login-pin">
-            <button className="kf-back-btn" onClick={()=>{setSelectedUser(null);setPin('');setError('');}}><ArrowLeft size={18}/>Back</button>
-            <div className="kf-avatar xl">{selectedUser.name.charAt(0)}</div>
-            <h3>{selectedUser.name}</h3>
-            <div className="kf-sub" style={{textAlign:'center',marginBottom:8}}>{selectedUser.role.replace('_',' ')}</div>
-            {error && <div className="kf-error"><AlertCircle size={16}/>{error}</div>}
-            <div className="kf-form-group"><label>Enter PIN</label>
-              <input type="password" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()} placeholder="••••" autoFocus/>
+            <button className="kf-back-btn" onClick={()=>{setSelected(null);setError('');}}><ArrowLeft size={18}/>Back</button>
+            <div className={`kf-avatar xl${isSA?' sa':''}`}>{isSA ? <Shield size={28}/> : selected.user.name.charAt(0)}</div>
+            <h3>{isSA ? 'Super Admin' : selected.user.name}</h3>
+            <div className="kf-sub" style={{textAlign:'center',marginBottom:12}}>
+              {isSA ? 'System Administrator' : `${selected.user.role.replace('_',' ')} · ${selected.company.name}`}
             </div>
-            <button className="kf-btn primary full" onClick={handleLogin}><Lock size={16}/>Login</button>
+            {error && <div className="kf-error"><AlertCircle size={16}/>{error}</div>}
+
+            {isSA ? (
+              <>
+                <div className="kf-form-group"><label>Username</label><input value={saUsername} onChange={e=>setSaUsername(e.target.value)} autoFocus/></div>
+                <div className="kf-form-group"><label>Password</label><input type="password" value={saPassword} onChange={e=>setSaPassword(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()}/></div>
+              </>
+            ) : (
+              <div className="kf-form-group"><label>Enter PIN</label>
+                <input type="password" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()} placeholder="••••" autoFocus/>
+              </div>
+            )}
+            <button className="kf-btn primary full" onClick={handleLogin} disabled={loggingIn}>
+              {loggingIn ? <Loader2 size={16} className="spin"/> : <Lock size={16}/>}Login
+            </button>
           </div>
         )}
       </div>
@@ -398,7 +390,7 @@ function UserLogin({ company, users, onLogin, onBack }) {
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   // Auth state
-  const [screen, setScreen] = useState('company-select'); // 'company-select' | 'user-login' | 'app' | 'superadmin-login' | 'superadmin'
+  const [screen, setScreen] = useState('login'); // 'login' | 'app' | 'superadmin'
   const [selectedCompany, setSelectedCompany] = useState(() => { try { return JSON.parse(localStorage.getItem('kf_company') || 'null'); } catch { return null; }});
   const [currentUser, setCurrentUser] = useState(() => { try { return JSON.parse(localStorage.getItem('kf_currentUser') || 'null'); } catch { return null; }});
 
@@ -427,11 +419,8 @@ export default function App() {
   useEffect(() => {
     const savedCompany = localStorage.getItem('kf_company');
     const savedUser = localStorage.getItem('kf_currentUser');
-    if (savedCompany && savedUser) {
-      setScreen('app');
-    } else if (savedCompany) {
-      setScreen('user-login');
-    }
+    if (savedCompany && savedUser) setScreen('app');
+    else setScreen('login');
   }, []);
 
   // Load company data when entering app screen
@@ -467,15 +456,14 @@ export default function App() {
   const handleSelectCompany = (company) => {
     setSelectedCompany(company);
     localStorage.setItem('kf_company', JSON.stringify(company));
-    // Load users for this company for the login screen
-    loadAllFromAPI(company.id).then(data => {
-      if (data?.users) setUsers(data.users);
-    });
+    loadAllFromAPI(company.id).then(data => { if (data?.users) setUsers(data.users); });
     setScreen('user-login');
   };
 
-  const handleUserLogin = (user) => {
+  const handleUserLogin = (user, company) => {
+    setSelectedCompany(company);
     setCurrentUser(user);
+    localStorage.setItem('kf_company', JSON.stringify(company));
     localStorage.setItem('kf_currentUser', JSON.stringify(user));
     setLocationFilter(user.role === 'technician' ? (user.locationId || null) : null);
     setScreen('app');
@@ -485,25 +473,21 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('kf_currentUser');
+    localStorage.removeItem('kf_company');
+    setSelectedCompany(null);
     setView('dashboard');
     setEditingEstimate(null);
     setLocationFilter(null);
-    setScreen('user-login');
+    setScreen('login');
   };
 
   const handleSwitchCompany = () => {
-    setCurrentUser(null);
-    setSelectedCompany(null);
-    localStorage.removeItem('kf_currentUser');
-    localStorage.removeItem('kf_company');
-    setScreen('company-select');
+    handleLogout();
   };
 
   // ── Screen routing ────────────────────────────────────────────────────────
-  if (screen === 'superadmin-login') return <SuperAdminLogin onLogin={()=>setScreen('superadmin')} onBack={()=>setScreen('company-select')}/>;
-  if (screen === 'superadmin') return <SuperAdminConsole onExit={()=>setScreen('company-select')}/>;
-  if (screen === 'company-select') return <CompanySelector onSelectCompany={handleSelectCompany} onSuperAdmin={()=>setScreen('superadmin-login')}/>;
-  if (screen === 'user-login') return <UserLogin company={selectedCompany} users={users} onLogin={handleUserLogin} onBack={handleSwitchCompany}/>;
+  if (screen === 'superadmin') return <SuperAdminConsole onExit={()=>setScreen('login')}/>;
+  if (screen === 'login') return <UnifiedLogin onLoginUser={handleUserLogin} onLoginSuperAdmin={()=>setScreen('superadmin')}/>;
 
   // ── App shell ─────────────────────────────────────────────────────────────
   const getName = c => c ? (c.type==='fleet' ? c.companyName : `${c.firstName} ${c.lastName}`) : '';
