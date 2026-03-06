@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Search, Plus, Users, Car, FileText, DollarSign, MessageSquare, 
   Settings, ChevronRight, Building2, Wrench, CheckCircle, AlertCircle, 
@@ -564,6 +564,7 @@ export default function App() {
   };
   const handleAddVehicle = (veh) => { const v={...veh,id:`v${Date.now()}`}; setVehicles([...vehicles,v]); return v; };
   const handleUpdateCustomer = (cust) => setCustomers(customers.map(c=>c.id===cust.id?cust:c));
+  const handleUpdateVehicle = (veh) => setVehicles(vehicles.map(v=>v.id===veh.id?veh:v));
 
   const handleConvertToInvoice = (doc) => {
     const docNum = doc.docNumber || parseInt(doc.number?.replace('EST-','')||'0');
@@ -593,7 +594,7 @@ export default function App() {
         document={editingEstimate} customers={sorted} vehicles={vehicles} users={users} locations={locations}
         settings={getEffectiveSettings(docLocationId)} cannedItems={cannedItems} currentUser={currentUser}
         getName={getName} onSave={handleDocumentSave} onAddCustomer={handleAddCustomer}
-        onAddVehicle={handleAddVehicle} onUpdateCustomer={handleUpdateCustomer}
+        onAddVehicle={handleAddVehicle} onUpdateCustomer={handleUpdateCustomer} onUpdateVehicle={handleUpdateVehicle}
         onConvert={handleConvertToInvoice} onRevert={handleRevertToEstimate}
         onClose={()=>setEditingEstimate(null)} notify={notify}
       />
@@ -1240,7 +1241,7 @@ function InvoiceDetail({invoice, customer, vehicle, settings, getName, onClose, 
 }
 
 // Customer/Vehicle selector component for estimate page
-function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selectedVehicleId, getName, onSelectCustomer, onSelectVehicle, onAddCustomer, onAddVehicle, onUpdateCustomer, notify}) {
+function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selectedVehicleId, getName, onSelectCustomer, onSelectVehicle, onAddCustomer, onAddVehicle, onUpdateCustomer, onUpdateVehicle, notify}) {
   const [showCustDropdown, setShowCustDropdown] = useState(false);
   const [showVehDropdown, setShowVehDropdown] = useState(false);
   const [showAddCust, setShowAddCust] = useState(false);
@@ -1507,6 +1508,36 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
               <code className="kf-vin-full">{vehicle.vin}</code>
               <span className="kf-copy-hint">📋 Copy</span>
             </div>
+            <div className="kf-mileage-row">
+              <div className="kf-mileage-field">
+                <label>Miles In</label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="—"
+                  value={vehicle.mileageIn ?? ''}
+                  onChange={e => {
+                    const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
+                    const updated = { ...vehicle, mileageIn: val };
+                    onUpdateVehicle(updated);
+                  }}
+                />
+              </div>
+              <div className="kf-mileage-field">
+                <label>Miles Out</label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="—"
+                  value={vehicle.mileageOut ?? ''}
+                  onChange={e => {
+                    const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
+                    const updated = { ...vehicle, mileageOut: val };
+                    onUpdateVehicle(updated);
+                  }}
+                />
+              </div>
+            </div>
             <div className="kf-external-links">
               <button className="kf-ext-link nhtsa" onClick={() => openNHTSA(vehicle.vin)}>
                 🔗 NHTSA
@@ -1593,10 +1624,11 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
 }
 
 // FULL PAGE DOCUMENT (Estimate or Invoice)
-function EstimatePage({document: initialDoc, customers, vehicles, users, settings, cannedItems, currentUser, getName, onSave, onAddCustomer, onAddVehicle, onUpdateCustomer, onConvert, onRevert, onClose, notify}) {
+function EstimatePage({document: initialDoc, customers, vehicles, users, settings, cannedItems, currentUser, getName, onSave, onAddCustomer, onAddVehicle, onUpdateCustomer, onUpdateVehicle, onConvert, onRevert, onClose, notify}) {
   const [doc, setDoc] = useState(initialDoc);
   const [tab, setTab] = useState('services');
   const [hasChanges, setHasChanges] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'pending' | 'saving'
   const [cannedSearch, setCannedSearch] = useState('');
   const [showCannedDropdown, setShowCannedDropdown] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
@@ -1604,18 +1636,68 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
   const [payAmount, setPayAmount] = useState(0);
   const fileInputRef = useRef();
   const cannedSearchRef = useRef();
+  const autoSaveTimer = useRef(null);
+  const docRef = useRef(doc);
+
+  // Keep ref in sync so the auto-save callback always sees latest doc
+  useEffect(() => { docRef.current = doc; }, [doc]);
 
   // Sync local state when the document prop changes (e.g., after convert to invoice)
   useEffect(() => {
     setDoc(initialDoc);
     setHasChanges(false);
+    setSaveStatus('saved');
   }, [initialDoc.id, initialDoc.docType, initialDoc.number]);
 
   const isInvoice = doc.docType === 'invoice';
   const customer = customers.find(c => c.id === doc.customerId);
   const vehicle = vehicles.find(v => v.id === doc.vehicleId);
 
-  const update = (changes) => { setDoc({...doc, ...changes}); setHasChanges(true); };
+  // ── Auto-save ────────────────────────────────────────────────────────────
+  const computeFinals = useCallback((d) => {
+    const sub = (d.items || []).reduce((s, item) => s + calcItemTotal(item, settings.laborRate), 0);
+    const customer = customers.find(c => c.id === d.customerId);
+    const disc = customer?.fleetDiscount ? sub * customer.fleetDiscount / 100 : 0;
+    const taxable = sub - disc;
+    const tx = taxable * settings.taxRate / 100;
+    const tot = taxable + tx;
+    const totalPaid = (d.payments || []).reduce((s, p) => s + p.amount, 0);
+    const bal = tot - totalPaid;
+    const isInv = d.docType === 'invoice';
+    return {
+      ...d,
+      subtotal: sub,
+      discount: disc || undefined,
+      taxRate: settings.taxRate,
+      tax: tx,
+      total: taxable,
+      finalTotal: tot,
+      ...(isInv && { balance: bal, status: bal <= 0 ? 'paid' : (totalPaid > 0 ? 'partial' : 'unpaid') }),
+    };
+  }, [settings, customers]);
+
+  const triggerAutoSave = useCallback(() => {
+    setSaveStatus('pending');
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      setSaveStatus('saving');
+      const finalized = computeFinals(docRef.current);
+      onSave(finalized);
+      setDoc(finalized);
+      setHasChanges(false);
+      setSaveStatus('saved');
+    }, 1500);
+  }, [computeFinals, onSave]);
+
+  // Cleanup timer on unmount
+  useEffect(() => () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); }, []);
+
+  const update = (changes) => {
+    const next = { ...doc, ...changes };
+    setDoc(next);
+    setHasChanges(true);
+    triggerAutoSave();
+  };
   const displayTitle = doc.title || (doc.items?.[0]?.description) || (isInvoice ? 'Untitled Invoice' : 'Untitled Estimate');
 
   const subtotal = (doc.items || []).reduce((s, item) => s + calcItemTotal(item, settings.laborRate), 0);
@@ -1659,19 +1741,12 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
   };
 
   const handleSave = () => {
-    const updated = {
-      ...doc, 
-      subtotal, 
-      discount: disc || undefined, 
-      taxRate: settings.taxRate, 
-      tax, 
-      total: taxable, 
-      finalTotal: total,
-      ...(isInvoice && { balance, status: balance <= 0 ? 'paid' : (totalPaid > 0 ? 'partial' : 'unpaid') })
-    };
-    onSave(updated);
-    setDoc(updated);
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    const finalized = computeFinals(doc);
+    onSave(finalized);
+    setDoc(finalized);
     setHasChanges(false);
+    setSaveStatus('saved');
   };
 
   const handlePayment = () => {
@@ -1704,6 +1779,10 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
     update({internalNotes: [...(doc.internalNotes || []), {
       id: `n${Date.now()}`, text: text.trim(), authorId: currentUser.id, authorName: currentUser.name, createdAt: new Date().toISOString()
     }]});
+  };
+
+  const handleUpdateVehicle = (updatedVehicle) => {
+    if (typeof onUpdateVehicle === 'function') onUpdateVehicle(updatedVehicle);
   };
 
   const handleFileUpload = (e) => {
@@ -1857,7 +1936,13 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
         <div className="kf-est-header-right">
           <button className="kf-btn secondary" onClick={() => handlePrint()}><Printer size={16}/>Print</button>
           <span className={`kf-badge lg ${doc.status}`}>{doc.status}</span>
-          {hasChanges && <button className="kf-btn primary" onClick={handleSave}><Save size={16}/>Save</button>}
+          {/* Auto-save status */}
+          <span className={`kf-autosave-status ${saveStatus}`}>
+            {saveStatus === 'saving' && <><Loader2 size={13} className="spin"/>Saving…</>}
+            {saveStatus === 'pending' && <><Loader2 size={13} className="spin"/>Unsaved…</>}
+            {saveStatus === 'saved' && !hasChanges && <><CheckCircle size={13}/>Saved</>}
+          </span>
+          {hasChanges && <button className="kf-btn primary" onClick={handleSave}><Save size={16}/>Save Now</button>}
           
           {/* Estimate actions */}
           {!isInvoice && doc.status === 'pending' && doc.customerId && doc.vehicleId && <button className="kf-btn success" onClick={() => {update({status:'approved'});notify('Approved!');}}><CheckCircle size={16}/>Approve</button>}
@@ -1897,6 +1982,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
             onAddCustomer={onAddCustomer}
             onAddVehicle={onAddVehicle}
             onUpdateCustomer={onUpdateCustomer}
+            onUpdateVehicle={handleUpdateVehicle}
             notify={notify}
           />
 
