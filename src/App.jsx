@@ -1226,6 +1226,8 @@ function InvoiceDetail({invoice, customer, vehicle, settings, getName, onClose, 
             <div><span>VIN:</span> ${vehicle.vin || 'N/A'}</div>
             <div><span>Plate:</span> ${vehicle.plate || 'N/A'}</div>
             ${vehicle.engine ? `<div><span>Engine:</span> ${vehicle.engine}</div>` : ''}
+            ${vehicle.mileageIn != null ? `<div><span>Miles In:</span> ${vehicle.mileageIn.toLocaleString()}</div>` : ''}
+            ${vehicle.mileageOut != null ? `<div><span>Miles Out:</span> ${vehicle.mileageOut.toLocaleString()}</div>` : ''}
           </div>
         </div>` : ''}
 
@@ -1907,6 +1909,8 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
             <div><span>VIN:</span> ${vehicle?.vin || 'N/A'}</div>
             <div><span>Plate:</span> ${vehicle?.plate || 'N/A'}</div>
             ${vehicle?.engine ? `<div><span>Engine:</span> ${vehicle.engine}</div>` : ''}
+            ${vehicle?.mileageIn != null ? `<div><span>Miles In:</span> ${vehicle.mileageIn.toLocaleString()}</div>` : ''}
+            ${vehicle?.mileageOut != null ? `<div><span>Miles Out:</span> ${vehicle.mileageOut.toLocaleString()}</div>` : ''}
           </div>
         </div>
 
