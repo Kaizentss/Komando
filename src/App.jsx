@@ -122,80 +122,87 @@ async function loadAllFromAPI(companyId) {
 function SuperAdminConsole({ onExit }) {
   const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('companies');
   const [showCreate, setShowCreate] = useState(false);
-  const [viewingCompany, setViewingCompany] = useState(null);
   const [toast, setToast] = useState(null);
   const [form, setForm] = useState({ companyName:'', companyId:'', masterAdminName:'', masterAdminPin:'', masterAdminEmail:'' });
   const [restoring, setRestoring] = useState(false);
   const restoreRef = useRef();
 
+  // Accounts state
+  const [accounts, setAccounts] = useState([]);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [newAccount, setNewAccount] = useState({ username:'', password:'' });
+  const [currentSaId, setCurrentSaId] = useState(() => { try { return JSON.parse(localStorage.getItem('kf_sa_session')||'null')?.id; } catch { return null; }});
+
   const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
 
-  useEffect(() => { fetchCompanies(); }, []);
+  useEffect(() => { fetchCompanies(); fetchAccounts(); }, []);
 
   const fetchCompanies = async () => {
     setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/api/superadmin/companies`);
-      if (res.ok) setCompanies(await res.json());
-    } catch {}
+    try { const res = await fetch(`${API_URL}/api/superadmin/companies`); if (res.ok) setCompanies(await res.json()); } catch {}
     setLoading(false);
   };
 
+  const fetchAccounts = async () => {
+    try { const res = await fetch(`${API_URL}/api/superadmin/accounts`); if (res.ok) setAccounts(await res.json()); } catch {}
+  };
+
   const createCompany = async () => {
-    if (!form.companyName || !form.companyId || !form.masterAdminName || !form.masterAdminPin) {
-      notify('All fields required', 'error'); return;
-    }
+    if (!form.companyName || !form.companyId || !form.masterAdminName || !form.masterAdminPin) { notify('All fields required', 'error'); return; }
     try {
-      const res = await fetch(`${API_URL}/api/superadmin/companies`, {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify(form)
-      });
-      if (res.ok) {
-        notify('Company created!');
-        setShowCreate(false);
-        setForm({ companyName:'', companyId:'', masterAdminName:'', masterAdminPin:'', masterAdminEmail:'' });
-        fetchCompanies();
-      } else {
-        const err = await res.json();
-        notify(err.detail || 'Failed to create', 'error');
-      }
-    } catch { notify('Network error', 'error'); }
+      const res = await fetch(`${API_URL}/api/superadmin/companies`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(form) });
+      if (res.ok) { notify('Company created!'); setShowCreate(false); setForm({companyName:'',companyId:'',masterAdminName:'',masterAdminPin:'',masterAdminEmail:''}); fetchCompanies(); }
+      else { const err = await res.json(); notify(err.detail||'Failed','error'); }
+    } catch { notify('Network error','error'); }
   };
 
   const toggleSuspend = async (c) => {
-    if (!confirm(`${c.suspended ? 'Unsuspend' : 'Suspend'} ${c.name}?`)) return;
-    await fetch(`${API_URL}/api/superadmin/companies/${c.id}`, {
-      method: 'PATCH', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ suspended: !c.suspended })
-    });
-    notify(`Company ${c.suspended ? 'unsuspended' : 'suspended'}`);
-    fetchCompanies();
+    if (!confirm(`${c.suspended?'Unsuspend':'Suspend'} ${c.name}?`)) return;
+    await fetch(`${API_URL}/api/superadmin/companies/${c.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({suspended:!c.suspended}) });
+    notify(`Company ${c.suspended?'unsuspended':'suspended'}`); fetchCompanies();
   };
 
   const deleteCompany = async (c) => {
     if (!confirm(`PERMANENTLY DELETE ${c.name}? This cannot be undone.`)) return;
-    await fetch(`${API_URL}/api/superadmin/companies/${c.id}`, { method: 'DELETE' });
-    notify('Company deleted');
-    fetchCompanies();
+    await fetch(`${API_URL}/api/superadmin/companies/${c.id}`, { method:'DELETE' });
+    notify('Company deleted'); fetchCompanies();
   };
 
-  const backupCompany = (cid) => { window.open(`${API_URL}/api/company/${cid}/backup`, '_blank'); };
-  const backupAll = () => { window.open(`${API_URL}/api/superadmin/backup`, '_blank'); };
+  const addAccount = async () => {
+    if (!newAccount.username || !newAccount.password) { notify('Username and password required','error'); return; }
+    const res = await fetch(`${API_URL}/api/superadmin/accounts`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(newAccount) });
+    if (res.ok) { notify('Account created'); setShowAddAccount(false); setNewAccount({username:'',password:''}); fetchAccounts(); }
+    else { const err = await res.json(); notify(err.detail||'Failed','error'); }
+  };
+
+  const saveAccount = async () => {
+    if (!editingAccount.username) { notify('Username required','error'); return; }
+    const res = await fetch(`${API_URL}/api/superadmin/accounts/${editingAccount.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:editingAccount.username, password:editingAccount.newPassword||undefined}) });
+    if (res.ok) { notify('Account updated'); setEditingAccount(null); fetchAccounts(); }
+    else { const err = await res.json(); notify(err.detail||'Failed','error'); }
+  };
+
+  const deleteAccount = async (id) => {
+    if (!confirm('Delete this super admin account?')) return;
+    const res = await fetch(`${API_URL}/api/superadmin/accounts/${id}`, { method:'DELETE' });
+    if (res.ok) { notify('Account deleted'); fetchAccounts(); }
+    else { const err = await res.json(); notify(err.detail||'Cannot delete last account','error'); }
+  };
+
+  const backupCompany = (cid) => window.open(`${API_URL}/api/company/${cid}/backup`, '_blank');
+  const backupAll = () => window.open(`${API_URL}/api/superadmin/backup`, '_blank');
 
   const handleRestoreAll = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files[0]; if (!file) return;
     if (!confirm('This will overwrite all company data. Continue?')) return;
     setRestoring(true);
     const fd = new FormData(); fd.append('file', file);
-    try {
-      const res = await fetch(`${API_URL}/api/superadmin/restore`, { method: 'POST', body: fd });
-      if (res.ok) { notify('Full restore complete! Refresh to see changes.'); }
-      else notify('Restore failed', 'error');
-    } catch { notify('Network error', 'error'); }
-    setRestoring(false);
-    e.target.value = '';
+    try { const res = await fetch(`${API_URL}/api/superadmin/restore`, {method:'POST',body:fd}); if (res.ok) notify('Restore complete! Refresh.'); else notify('Restore failed','error'); }
+    catch { notify('Network error','error'); }
+    setRestoring(false); e.target.value = '';
   };
 
   return (
@@ -206,56 +213,112 @@ function SuperAdminConsole({ onExit }) {
         <div className="kf-sa-header-actions">
           <button className="kf-btn secondary sm" onClick={backupAll}><Download size={15}/>Backup All</button>
           <label className="kf-btn secondary sm" style={{cursor:'pointer'}}>
-            {restoring ? <Loader2 size={15} className="spin"/> : <RefreshCw size={15}/>}Restore All
+            {restoring?<Loader2 size={15} className="spin"/>:<RefreshCw size={15}/>}Restore All
             <input ref={restoreRef} type="file" accept=".zip" style={{display:'none'}} onChange={handleRestoreAll}/>
           </label>
-          <button className="kf-btn primary sm" onClick={() => setShowCreate(true)}><Plus size={15}/>New Company</button>
           <button className="kf-icon-btn" onClick={onExit} title="Exit"><LogOut size={18}/></button>
         </div>
       </div>
 
       <div className="kf-sa-body">
-        {showCreate && (
-          <div className="kf-sa-card kf-sa-create">
-            <div className="kf-section-header"><h3><Building2 size={18}/>Create New Company</h3><button className="kf-icon-btn" onClick={()=>setShowCreate(false)}><X size={18}/></button></div>
-            <div className="kf-row">
-              <div className="kf-form-group"><label>Company Name *</label><input value={form.companyName} onChange={e=>setForm({...form,companyName:e.target.value})} placeholder="Kaizen Automotive"/></div>
-              <div className="kf-form-group"><label>Company ID * <span className="kf-sub">(slug, no spaces)</span></label><input value={form.companyId} onChange={e=>setForm({...form,companyId:e.target.value.toLowerCase().replace(/\s/g,'-')})} placeholder="kaizen"/></div>
+        <div className="kf-settings-tabs" style={{marginBottom:24}}>
+          <button className={tab==='companies'?'active':''} onClick={()=>setTab('companies')}><Building2 size={16}/>Companies</button>
+          <button className={tab==='accounts'?'active':''} onClick={()=>setTab('accounts')}><Shield size={16}/>Super Admin Accounts</button>
+        </div>
+
+        {tab === 'companies' && (
+          <>
+            {showCreate && (
+              <div className="kf-sa-card kf-sa-create">
+                <div className="kf-section-header"><h3><Building2 size={18}/>Create New Company</h3><button className="kf-icon-btn" onClick={()=>setShowCreate(false)}><X size={18}/></button></div>
+                <div className="kf-row">
+                  <div className="kf-form-group"><label>Company Name *</label><input value={form.companyName} onChange={e=>setForm({...form,companyName:e.target.value})} placeholder="Kaizen Automotive"/></div>
+                  <div className="kf-form-group"><label>Company ID * <span className="kf-sub">(slug)</span></label><input value={form.companyId} onChange={e=>setForm({...form,companyId:e.target.value.toLowerCase().replace(/\s/g,'-')})} placeholder="kaizen"/></div>
+                </div>
+                <div className="kf-row">
+                  <div className="kf-form-group"><label>Master Admin Name *</label><input value={form.masterAdminName} onChange={e=>setForm({...form,masterAdminName:e.target.value})}/></div>
+                  <div className="kf-form-group"><label>Master Admin PIN *</label><input type="password" maxLength={6} value={form.masterAdminPin} onChange={e=>setForm({...form,masterAdminPin:e.target.value})}/></div>
+                </div>
+                <div className="kf-form-group"><label>Master Admin Email</label><input value={form.masterAdminEmail} onChange={e=>setForm({...form,masterAdminEmail:e.target.value})}/></div>
+                <div className="kf-row" style={{marginTop:8}}><button className="kf-btn secondary" onClick={()=>setShowCreate(false)}>Cancel</button><button className="kf-btn primary" onClick={createCompany}><Save size={16}/>Create Company</button></div>
+              </div>
+            )}
+            <div className="kf-sa-companies">
+              <div className="kf-section-header" style={{marginBottom:16}}>
+                <h2 style={{margin:0,display:'flex',alignItems:'center',gap:8}}><Globe size={20}/> Companies <span className="kf-badge">{companies.length}</span></h2>
+                <button className="kf-btn primary sm" onClick={()=>setShowCreate(true)}><Plus size={15}/>New Company</button>
+              </div>
+              {loading ? <div className="kf-loading"><Loader2 size={32} className="spin"/></div> : companies.length === 0 ? (
+                <div className="kf-empty"><Building2 size={60}/><p>No companies yet.</p></div>
+              ) : (
+                <div className="kf-sa-company-list">
+                  {companies.map(c => (
+                    <div key={c.id} className={`kf-sa-company-row ${c.suspended?'suspended':''}`}>
+                      <div className="kf-sa-co-icon"><Building2 size={22}/></div>
+                      <div className="kf-sa-co-info">
+                        <div className="kf-name">{c.name} {c.suspended && <span className="kf-badge danger">Suspended</span>}</div>
+                        <div className="kf-sub">ID: <code>{c.id}</code> · Master: {c.masterAdmin} · Created: {c.createdAt?.split('T')[0]}</div>
+                      </div>
+                      <div className="kf-sa-co-actions">
+                        <button className="kf-btn secondary sm" onClick={()=>backupCompany(c.id)}><Download size={14}/>Backup</button>
+                        <button className={`kf-btn sm ${c.suspended?'success':'secondary'}`} onClick={()=>toggleSuspend(c)}><PowerOff size={14}/>{c.suspended?'Unsuspend':'Suspend'}</button>
+                        <button className="kf-btn danger sm" onClick={()=>deleteCompany(c)}><Trash2 size={14}/>Delete</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <div className="kf-row">
-              <div className="kf-form-group"><label>Master Admin Name *</label><input value={form.masterAdminName} onChange={e=>setForm({...form,masterAdminName:e.target.value})} placeholder="Roy"/></div>
-              <div className="kf-form-group"><label>Master Admin PIN *</label><input type="password" maxLength={6} value={form.masterAdminPin} onChange={e=>setForm({...form,masterAdminPin:e.target.value})} placeholder="••••"/></div>
-            </div>
-            <div className="kf-form-group"><label>Master Admin Email</label><input value={form.masterAdminEmail} onChange={e=>setForm({...form,masterAdminEmail:e.target.value})} placeholder="admin@company.com"/></div>
-            <div className="kf-row" style={{marginTop:8}}><button className="kf-btn secondary" onClick={()=>setShowCreate(false)}>Cancel</button><button className="kf-btn primary" onClick={createCompany}><Save size={16}/>Create Company</button></div>
-          </div>
+          </>
         )}
 
-        <div className="kf-sa-companies">
-          <h2><Globe size={20}/> Companies <span className="kf-badge">{companies.length}</span></h2>
-          {loading ? <div className="kf-loading"><Loader2 size={32} className="spin"/></div> : companies.length === 0 ? (
-            <div className="kf-empty"><Building2 size={60}/><p>No companies yet. Create one to get started.</p></div>
-          ) : (
-            <div className="kf-sa-company-list">
-              {companies.map(c => (
-                <div key={c.id} className={`kf-sa-company-row ${c.suspended ? 'suspended' : ''}`}>
-                  <div className="kf-sa-co-icon"><Building2 size={22}/></div>
-                  <div className="kf-sa-co-info">
-                    <div className="kf-name">{c.name} {c.suspended && <span className="kf-badge danger">Suspended</span>}</div>
-                    <div className="kf-sub">ID: <code>{c.id}</code> · Master Admin: {c.masterAdmin} · Created: {c.createdAt?.split('T')[0]}</div>
-                  </div>
-                  <div className="kf-sa-co-actions">
-                    <button className="kf-btn secondary sm" onClick={()=>backupCompany(c.id)} title="Backup DB"><Download size={14}/>Backup</button>
-                    <button className={`kf-btn sm ${c.suspended ? 'success' : 'secondary'}`} onClick={()=>toggleSuspend(c)}>
-                      <PowerOff size={14}/>{c.suspended ? 'Unsuspend' : 'Suspend'}
-                    </button>
-                    <button className="kf-btn danger sm" onClick={()=>deleteCompany(c)}><Trash2 size={14}/>Delete</button>
-                  </div>
+        {tab === 'accounts' && (
+          <div className="kf-sa-card">
+            <div className="kf-section-header">
+              <h3><Shield size={18}/>Super Admin Accounts</h3>
+              <button className="kf-btn primary sm" onClick={()=>setShowAddAccount(true)}><Plus size={14}/>Add Account</button>
+            </div>
+            <p className="kf-sub" style={{marginBottom:16}}>Each account can log in to this console independently.</p>
+
+            {showAddAccount && (
+              <div className="kf-add-user-form">
+                <div className="kf-row">
+                  <div className="kf-form-group"><label>Username *</label><input value={newAccount.username} onChange={e=>setNewAccount({...newAccount,username:e.target.value})} autoFocus/></div>
+                  <div className="kf-form-group"><label>Password *</label><input type="password" value={newAccount.password} onChange={e=>setNewAccount({...newAccount,password:e.target.value})}/></div>
+                </div>
+                <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setShowAddAccount(false)}>Cancel</button><button className="kf-btn primary" onClick={addAccount}><Save size={16}/>Add</button></div>
+              </div>
+            )}
+
+            <div className="kf-users-list">
+              {accounts.map(a => (
+                <div key={a.id} className="kf-user-row">
+                  {editingAccount?.id === a.id ? (
+                    <div className="kf-user-edit" style={{width:'100%'}}>
+                      <div className="kf-row">
+                        <div className="kf-form-group"><label>Username *</label><input value={editingAccount.username} onChange={e=>setEditingAccount({...editingAccount,username:e.target.value})}/></div>
+                        <div className="kf-form-group"><label>New Password <span className="kf-sub">(leave blank to keep)</span></label><input type="password" value={editingAccount.newPassword||''} onChange={e=>setEditingAccount({...editingAccount,newPassword:e.target.value})} placeholder="••••••"/></div>
+                      </div>
+                      <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setEditingAccount(null)}>Cancel</button><button className="kf-btn primary" onClick={saveAccount}><Save size={16}/>Save</button></div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="kf-avatar sa"><Shield size={16}/></div>
+                      <div className="kf-user-info">
+                        <div className="kf-name">{a.username}</div>
+                        <div className="kf-sub"><span className="kf-role-tag master_admin"><Shield size={12}/>super admin</span></div>
+                      </div>
+                      <div className="kf-user-actions">
+                        <button className="kf-icon-btn" onClick={()=>setEditingAccount({...a,newPassword:''})}><Edit2 size={15}/></button>
+                        {accounts.length > 1 && <button className="kf-icon-btn danger" onClick={()=>deleteAccount(a.id)}><Trash2 size={15}/></button>}
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -310,7 +373,7 @@ function UnifiedLogin({ onLoginUser, onLoginSuperAdmin }) {
           method: 'POST', headers: {'Content-Type':'application/json'},
           body: JSON.stringify({ username: saUsername, password: saPassword })
         });
-        if (res.ok) { onLoginSuperAdmin(); }
+        if (res.ok) { const d = await res.json(); localStorage.setItem('kf_sa_session', JSON.stringify({id:d.id,username:d.username})); onLoginSuperAdmin(); }
         else { setError('Invalid credentials'); }
       } catch { setError('Connection error'); }
     } else {
