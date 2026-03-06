@@ -266,6 +266,38 @@ async def superadmin_view_company(cid: str):
     conn.close()
     return {r['key']: json.loads(r['value']) for r in rows}
 
+class UpdateUserRequest(BaseModel):
+    userId: str
+    email: Optional[str] = None
+    password: Optional[str] = None
+    name: Optional[str] = None
+
+@app.patch("/api/superadmin/companies/{cid}/users/{user_id}")
+async def superadmin_update_user(cid: str, user_id: str, body: UpdateUserRequest):
+    if not get_company(cid):
+        raise HTTPException(404, "Company not found")
+    conn = get_company_db(cid)
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM store WHERE key='users'")
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, "Users not found")
+    users = json.loads(row["value"])
+    user = next((u for u in users if u["id"] == user_id), None)
+    if not user:
+        raise HTTPException(404, "User not found")
+    if body.email: user["email"] = body.email
+    if body.password: user["password"] = body.password
+    if body.name: user["name"] = body.name
+    conn = get_company_db(cid)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO store (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+        ("users", json.dumps(users)))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "user": user}
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  COMPANY USER AUTH  /api/auth/login
 # ═════════════════════════════════════════════════════════════════════════════
