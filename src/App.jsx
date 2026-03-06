@@ -1533,11 +1533,11 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
         )}
 
         {showCustDropdown && (
-          <div className="kf-dropdown">
+          <div className="kf-dropdown" onMouseDown={e => e.preventDefault()}>
             <div className="kf-dropdown-search"><Search size={14}/><input placeholder="Search..." value={custSearch} onChange={e => setCustSearch(e.target.value)} autoFocus/></div>
             <div className="kf-dropdown-list">
               {filteredCustomers.map(c => (
-                <div key={c.id} className={`kf-dropdown-item ${c.id === selectedCustomerId ? 'selected' : ''}`} onClick={() => {onSelectCustomer(c.id);setShowCustDropdown(false);onSelectVehicle(null);}}>
+                <div key={c.id} className={`kf-dropdown-item ${c.id === selectedCustomerId ? 'selected' : ''}`} onMouseDown={e => {e.preventDefault();onSelectCustomer(c.id);setShowCustDropdown(false);onSelectVehicle(null);}}>
                   <div className="kf-avatar sm">{getName(c).charAt(0)}</div>
                   <div>
                     <div className="kf-name">{getName(c)}</div>
@@ -1547,7 +1547,7 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
               ))}
               {filteredCustomers.length === 0 && <div className="kf-dropdown-empty">No customers found</div>}
             </div>
-            <div className="kf-dropdown-footer"><button onClick={() => {setShowCustDropdown(false);setShowAddCust(true);}}><Plus size={14}/>Add New Customer</button></div>
+            <div className="kf-dropdown-footer"><button onMouseDown={e => {e.preventDefault();setShowCustDropdown(false);setShowAddCust(true);}}><Plus size={14}/>Add New Customer</button></div>
           </div>
         )}
 
@@ -1763,7 +1763,7 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
         )}
 
         {showVehDropdown && selectedCustomerId && (
-          <div className="kf-dropdown">
+          <div className="kf-dropdown" onMouseDown={e => e.preventDefault()}>
             <div className="kf-dropdown-tabs">
               <button className={vehMode==='select'?'active':''} onClick={()=>setVehMode('select')}>Existing</button>
               <button className={vehMode==='vin'?'active':''} onClick={()=>setVehMode('vin')}>VIN</button>
@@ -1773,14 +1773,14 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
               <>
                 <div className="kf-dropdown-list">
                   {customerVehicles.map(v => (
-                    <div key={v.id} className={`kf-dropdown-item ${v.id === selectedVehicleId ? 'selected' : ''}`} onClick={() => {onSelectVehicle(v.id);setShowVehDropdown(false);}}>
+                    <div key={v.id} className={`kf-dropdown-item ${v.id === selectedVehicleId ? 'selected' : ''}`} onMouseDown={e => {e.preventDefault();onSelectVehicle(v.id);setShowVehDropdown(false);}}>
                       <Car size={18}/>
                       <div><div className="kf-name">{v.year} {v.make} {v.model}</div><div className="kf-sub">{v.plate} • {v.vin}</div></div>
                     </div>
                   ))}
                   {customerVehicles.length === 0 && <div className="kf-dropdown-empty">No vehicles for this customer</div>}
                 </div>
-                <div className="kf-dropdown-footer"><button onClick={() => setVehMode('vin')}><Plus size={14}/>Add New Vehicle</button></div>
+                <div className="kf-dropdown-footer"><button onMouseDown={e => {e.preventDefault();setVehMode('vin');}}><Plus size={14}/>Add New Vehicle</button></div>
               </>
             )}
             {vehMode === 'vin' && (
