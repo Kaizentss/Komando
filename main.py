@@ -177,6 +177,15 @@ async def delete_superadmin_account(admin_id: str):
 async def list_companies():
     return load_registry().get("companies", [])
 
+@app.get("/api/debug/registry")
+async def debug_registry():
+    """Temporary debug: show raw registry contents"""
+    if os.path.exists(REGISTRY_PATH):
+        with open(REGISTRY_PATH) as f:
+            raw = f.read()
+        return {"exists": True, "path": REGISTRY_PATH, "raw": raw}
+    return {"exists": False, "path": REGISTRY_PATH}
+
 @app.post("/api/superadmin/companies")
 async def create_company(body: CreateCompanyRequest):
     reg = load_registry()
