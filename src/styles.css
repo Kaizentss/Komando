@@ -859,3 +859,329 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
 .kf-summary-row .green {
   color: var(--success);
 }
+
+/* ===== Multi-Location / Multi-User Styles ===== */
+
+/* Location filter in header */
+.kf-loc-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--text-dim);
+}
+.kf-loc-filter select {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 8px 0;
+  cursor: pointer;
+}
+
+/* Location tag pill */
+.kf-loc-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(69,123,157,0.2);
+  color: #89b8d4;
+  font-size: 0.75rem;
+  padding: 2px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+/* Role tag pill */
+.kf-role-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.75rem;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+.kf-role-tag.admin { background: rgba(230,57,70,0.2); color: var(--primary); }
+.kf-role-tag.manager { background: rgba(233,196,106,0.2); color: #e9c46a; }
+.kf-role-tag.tech { background: rgba(45,147,108,0.2); color: var(--success); }
+
+/* User meta row */
+.kf-user-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* User row actions */
+.kf-user-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* Settings tabs */
+.kf-settings-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+.kf-settings-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all 0.15s;
+}
+.kf-settings-tabs button:hover { color: var(--text); }
+.kf-settings-tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+/* Location list */
+.kf-loc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kf-loc-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  transition: background 0.15s;
+}
+.kf-loc-row:hover { background: rgba(255,255,255,0.04); }
+.kf-loc-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: rgba(69,123,157,0.2);
+  color: #89b8d4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.kf-loc-info { flex: 1; min-width: 0; }
+.kf-loc-overrides { color: #89b8d4; }
+.kf-loc-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Location form */
+.kf-loc-form {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+/* User edit inline */
+.kf-user-edit {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+/* ===== Multi-Company / Super Admin Styles ===== */
+
+/* Company badge in sidebar */
+.kf-company-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin: 0 8px 8px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.15s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kf-company-badge:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+
+/* Super admin link on login screen */
+.kf-sa-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  margin-top: 20px;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.kf-sa-link:hover { opacity: 1; color: var(--text); }
+
+/* Super Admin Console */
+.kf-sa-console {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+.kf-sa-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 28px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.kf-sa-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--primary);
+}
+.kf-sa-brand h1 { font-size: 1.4rem; margin: 0; color: var(--text); }
+.kf-sa-brand span { font-size: 0.8rem; color: var(--text-dim); }
+.kf-sa-header-actions { display: flex; align-items: center; gap: 8px; }
+
+.kf-sa-body {
+  padding: 28px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.kf-sa-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+.kf-sa-create { border-color: var(--primary); }
+
+.kf-sa-companies h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.1rem;
+  margin-bottom: 16px;
+}
+.kf-sa-company-list { display: flex; flex-direction: column; gap: 8px; }
+.kf-sa-company-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: background 0.15s;
+}
+.kf-sa-company-row:hover { background: rgba(255,255,255,0.03); }
+.kf-sa-company-row.suspended { opacity: 0.6; }
+.kf-sa-co-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(230,57,70,0.15);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.kf-sa-co-icon.sm {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+}
+.kf-sa-co-info { flex: 1; min-width: 0; }
+.kf-sa-co-actions { display: flex; align-items: center; gap: 6px; }
+
+/* Loading overlay */
+.kf-loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+/* Danger button */
+.kf-btn.danger {
+  background: rgba(230,57,70,0.15);
+  color: var(--primary);
+  border: 1px solid rgba(230,57,70,0.3);
+}
+.kf-btn.danger:hover { background: rgba(230,57,70,0.25); }
+
+/* Success button */
+.kf-btn.success {
+  background: rgba(45,147,108,0.15);
+  color: var(--success);
+  border: 1px solid rgba(45,147,108,0.3);
+}
+.kf-btn.success:hover { background: rgba(45,147,108,0.25); }
+
+/* Master admin role tag */
+.kf-role-tag.master_admin { background: rgba(230,57,70,0.25); color: #ff6b7a; }
+.kf-role-tag.admin { background: rgba(230,57,70,0.2); color: var(--primary); }
+.kf-role-tag.technician { background: rgba(45,147,108,0.2); color: var(--success); }
+
+/* Badge danger */
+.kf-badge.danger { background: rgba(230,57,70,0.2); color: var(--primary); }
+
+/* ===== Unified Login ===== */
+.kf-avatar.sa {
+  background: linear-gradient(135deg, rgba(230,57,70,0.3), rgba(230,57,70,0.1));
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.kf-avatar.xl.sa {
+  background: linear-gradient(135deg, rgba(230,57,70,0.3), rgba(230,57,70,0.1));
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.kf-login-user.kf-login-sa {
+  border: 1px solid rgba(230,57,70,0.2);
+  background: rgba(230,57,70,0.05);
+}
+.kf-login-user.kf-login-sa:hover {
+  background: rgba(230,57,70,0.1);
+  border-color: rgba(230,57,70,0.4);
+}
+.kf-login-divider {
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 10px 0 6px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
