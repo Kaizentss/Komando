@@ -369,8 +369,8 @@ function UnifiedLogin({ onLoginUser, onLoginSuperAdmin }) {
 
             {isSA ? (
               <>
-                <div className="kf-form-group"><label>Username</label><input value={saUsername} onChange={e=>setSaUsername(e.target.value)} autoFocus/></div>
-                <div className="kf-form-group"><label>Password</label><input type="password" value={saPassword} onChange={e=>setSaPassword(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()}/></div>
+                <div className="kf-form-group"><label>Username</label><input value={saUsername} onChange={e=>setSaUsername(e.target.value)} style={{letterSpacing:'normal',fontSize:'1rem',textAlign:'left'}} autoFocus/></div>
+                <div className="kf-form-group"><label>Password</label><input type="password" value={saPassword} onChange={e=>setSaPassword(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()} style={{letterSpacing:'normal',fontSize:'1rem',textAlign:'left'}}/></div>
               </>
             ) : (
               <div className="kf-form-group"><label>Enter PIN</label>
