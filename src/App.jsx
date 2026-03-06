@@ -1392,6 +1392,8 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
   const [showAddCust, setShowAddCust] = useState(false);
   const [showEditCust, setShowEditCust] = useState(false);
   const [custSearch, setCustSearch] = useState('');
+  const custSearchRef = useRef(null);
+  const custDropdownRef = useRef(null);
   const [vehMode, setVehMode] = useState('select');
   const [vin, setVin] = useState('');
   const [plate, setPlate] = useState('');
@@ -1496,7 +1498,7 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
           <div className="kf-info-label"><Users size={16}/> Customer</div>
           <div className="kf-header-btns">
             {customer && <button className="kf-edit-btn" onClick={handleEditCustomer}><Edit2 size={14}/>Edit</button>}
-            <button className="kf-change-btn" onClick={() => setShowCustDropdown(!showCustDropdown)}>{customer ? 'Change' : 'Select'}<ChevronDown size={14}/></button>
+            <button className="kf-change-btn" onClick={() => { const next = !showCustDropdown; setShowCustDropdown(next); if (next) setTimeout(() => custSearchRef.current?.focus(), 0); }}>{customer ? 'Change' : 'Select'}<ChevronDown size={14}/></button>
           </div>
         </div>
         
@@ -1529,12 +1531,12 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
             </div>
           </div>
         ) : (
-          <div className="kf-info-empty" onClick={() => setShowCustDropdown(true)}>Click to select customer...</div>
+          <div className="kf-info-empty" onClick={() => { setShowCustDropdown(true); setTimeout(() => custSearchRef.current?.focus(), 0); }}>Click to select customer...</div>
         )}
 
         {showCustDropdown && (
           <div className="kf-dropdown" onMouseDown={e => e.preventDefault()}>
-            <div className="kf-dropdown-search"><Search size={14}/><input placeholder="Search..." value={custSearch} onChange={e => setCustSearch(e.target.value)} autoFocus/></div>
+            <div className="kf-dropdown-search"><Search size={14}/><input ref={custSearchRef} placeholder="Search..." value={custSearch} onChange={e => setCustSearch(e.target.value)}/></div>
             <div className="kf-dropdown-list">
               {filteredCustomers.map(c => (
                 <div key={c.id} className={`kf-dropdown-item ${c.id === selectedCustomerId ? 'selected' : ''}`} onMouseDown={e => {e.preventDefault();onSelectCustomer(c.id);setShowCustDropdown(false);onSelectVehicle(null);}}>
@@ -1904,6 +1906,12 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
     setHasChanges(true);
     triggerAutoSave();
   };
+  // Silent update: sets doc state without triggering auto-save (used for customer/vehicle selection
+  // to avoid a mid-interaction re-render that disrupts dropdown state)
+  const updateSilent = (changes) => {
+    setDoc(prev => ({ ...prev, ...changes }));
+    setHasChanges(true);
+  };
   const displayTitle = doc.title || (doc.items?.[0]?.description) || (isInvoice ? 'Untitled Invoice' : 'Untitled Estimate');
 
   const subtotal = (doc.items || []).reduce((s, item) => s + calcItemTotal(item, settings.laborRate), 0);
@@ -2185,8 +2193,8 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
             selectedCustomerId={doc.customerId}
             selectedVehicleId={doc.vehicleId}
             getName={getName}
-            onSelectCustomer={(id) => update({customerId: id, vehicleId: null})}
-            onSelectVehicle={(id) => update({vehicleId: id})}
+            onSelectCustomer={(id) => updateSilent({customerId: id, vehicleId: null})}
+            onSelectVehicle={(id) => updateSilent({vehicleId: id})}
             onAddCustomer={onAddCustomer}
             onAddVehicle={onAddVehicle}
             onUpdateCustomer={onUpdateCustomer}
