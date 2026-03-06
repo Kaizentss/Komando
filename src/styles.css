@@ -103,18 +103,21 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
 -pay-methods > div.active { border-color: var(--success); background: rgba(45,147,108,0.1); }
 
 /* Login Screen */
-.kf-login { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%); }
-.kf-login-box { background: var(--card); border-radius: 16px; padding: 40px; width: 90%; max-width: 400px; border: 1px solid var(--border); }
-.kf-login-header { text-align: center; margin-bottom: 32px; }
+.kf-login { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%); padding: 20px; }
+.kf-login-box { background: var(--card); border-radius: 16px; padding: 36px 40px; width: 100%; max-width: 480px; border: 1px solid var(--border); }
+.kf-login-header { text-align: center; margin-bottom: 28px; }
 .kf-login-header h1 { font-size: 1.5rem; margin: 12px 0 4px; }
 .kf-login-header p { color: var(--text-dim); }
 .kf-login-users h3, .kf-login-pin h3 { font-size: 1rem; color: var(--text-dim); margin-bottom: 16px; text-align: center; }
-.kf-login-user { display: flex; align-items: center; gap: 12px; width: 100%; padding: 16px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 8px; text-align: left; }
+.kf-login-user { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 8px; text-align: left; }
 .kf-login-user:hover { background: rgba(255,255,255,0.06); }
-.kf-login-user > div { flex: 1; }
+.kf-login-user > div { flex: 1; min-width: 0; }
+.kf-login-user .kf-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kf-login-user .kf-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.78rem; }
 .kf-login-pin { text-align: center; }
 .kf-login-pin .kf-avatar { margin: 0 auto 16px; }
 .kf-login-pin input { text-align: center; font-size: 1.5rem; letter-spacing: 8px; }
+.kf-login-pin input[type="text"], .kf-login-pin input[type="password"][placeholder=""], .kf-login-pin input.no-track { letter-spacing: normal; font-size: 1rem; text-align: left; }
 .kf-back-btn { display: flex; align-items: center; gap: 6px; color: var(--text-dim); margin-bottom: 20px; font-size: 0.9rem; }
 .kf-back-btn:hover { color: var(--text); }
 
