@@ -173,6 +173,10 @@ async def delete_superadmin_account(admin_id: str):
 
     return load_registry()["companies"]
 
+@app.get("/api/superadmin/companies")
+async def list_companies():
+    return load_registry().get("companies", [])
+
 @app.post("/api/superadmin/companies")
 async def create_company(body: CreateCompanyRequest):
     reg = load_registry()
