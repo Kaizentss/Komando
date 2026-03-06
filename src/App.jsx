@@ -383,6 +383,9 @@ function UnifiedLogin({ onLoginUser, onLoginSuperAdmin }) {
   );
 }
 
+// ─── Main App ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const [screen, setScreen] = useState('login');
   const [selectedCompany, setSelectedCompany] = useState(() => { try { return JSON.parse(localStorage.getItem('kf_company') || 'null'); } catch { return null; }});
   const [currentUser, setCurrentUser] = useState(() => { try { return JSON.parse(localStorage.getItem('kf_currentUser') || 'null'); } catch { return null; }});
 
@@ -445,12 +448,6 @@ function UnifiedLogin({ onLoginUser, onLoginSuperAdmin }) {
   useEffect(() => { if (!isLoading && cid) saveData(cid,'cannedItems',cannedItems); }, [cannedItems]);
 
   // ── Auth handlers ─────────────────────────────────────────────────────────
-  const handleSelectCompany = (company) => {
-    setSelectedCompany(company);
-    localStorage.setItem('kf_company', JSON.stringify(company));
-    loadAllFromAPI(company.id).then(data => { if (data?.users) setUsers(data.users); });
-    setScreen('user-login');
-  };
 
   const handleUserLogin = (user, company) => {
     setSelectedCompany(company);
