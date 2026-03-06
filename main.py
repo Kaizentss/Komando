@@ -19,9 +19,23 @@ REGISTRY_PATH = os.path.join(DATA_DIR, 'registry.json')
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(COMPANIES_DIR, exist_ok=True)
 
-# ── Super-admin credentials (env-configurable) ────────────────────────────────
+# ── Super-admin credentials ───────────────────────────────────────────────────
+# Stored in registry under "superadmins" key. Falls back to env vars for first boot.
 SUPERADMIN_USERNAME = os.environ.get('SUPERADMIN_USERNAME', 'superadmin')
 SUPERADMIN_PASSWORD = os.environ.get('SUPERADMIN_PASSWORD', 'Komando@SA2025!')
+
+def get_superadmins() -> list:
+    reg = load_registry()
+    if "superadmins" not in reg:
+        # First boot: seed from env vars
+        reg["superadmins"] = [{"id": "sa1", "username": SUPERADMIN_USERNAME, "password": SUPERADMIN_PASSWORD}]
+        save_registry(reg)
+    return reg["superadmins"]
+
+def save_superadmins(admins: list):
+    reg = load_registry()
+    reg["superadmins"] = admins
+    save_registry(reg)
 
 app = FastAPI(title="Komando API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
@@ -103,12 +117,60 @@ class UpdateCompanyRequest(BaseModel):
 # ═════════════════════════════════════════════════════════════════════════════
 @app.post("/api/superadmin/login")
 async def superadmin_login(body: SuperAdminLogin):
-    if body.username != SUPERADMIN_USERNAME or body.password != SUPERADMIN_PASSWORD:
+    admins = get_superadmins()
+    match = next((a for a in admins if a["username"] == body.username and a["password"] == body.password), None)
+    if not match:
         raise HTTPException(401, "Invalid credentials")
-    return {"ok": True, "role": "superadmin"}
+    return {"ok": True, "role": "superadmin", "id": match["id"], "username": match["username"]}
 
-@app.get("/api/superadmin/companies")
-async def list_companies():
+@app.get("/api/superadmin/accounts")
+async def list_superadmin_accounts():
+    admins = get_superadmins()
+    return [{"id": a["id"], "username": a["username"]} for a in admins]  # never return passwords
+
+class SuperAdminAccountRequest(BaseModel):
+    username: str
+    password: str
+
+class UpdateSuperAdminRequest(BaseModel):
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+@app.post("/api/superadmin/accounts")
+async def create_superadmin_account(body: SuperAdminAccountRequest):
+    admins = get_superadmins()
+    if any(a["username"] == body.username for a in admins):
+        raise HTTPException(409, "Username already exists")
+    new_admin = {"id": f"sa{len(admins)+1}_{int(datetime.utcnow().timestamp())}", "username": body.username, "password": body.password}
+    admins.append(new_admin)
+    save_superadmins(admins)
+    return {"ok": True, "id": new_admin["id"], "username": new_admin["username"]}
+
+@app.patch("/api/superadmin/accounts/{admin_id}")
+async def update_superadmin_account(admin_id: str, body: UpdateSuperAdminRequest):
+    admins = get_superadmins()
+    admin = next((a for a in admins if a["id"] == admin_id), None)
+    if not admin:
+        raise HTTPException(404, "Account not found")
+    if body.username:
+        if any(a["username"] == body.username and a["id"] != admin_id for a in admins):
+            raise HTTPException(409, "Username already taken")
+        admin["username"] = body.username
+    if body.password:
+        admin["password"] = body.password
+    save_superadmins(admins)
+    return {"ok": True, "id": admin["id"], "username": admin["username"]}
+
+@app.delete("/api/superadmin/accounts/{admin_id}")
+async def delete_superadmin_account(admin_id: str):
+    admins = get_superadmins()
+    if len(admins) <= 1:
+        raise HTTPException(400, "Cannot delete the last super admin account")
+    admins = [a for a in admins if a["id"] != admin_id]
+    save_superadmins(admins)
+    return {"ok": True}
+
+
     return load_registry()["companies"]
 
 @app.post("/api/superadmin/companies")
