@@ -699,8 +699,8 @@ export default function App() {
           {view==='dashboard'  && <Dashboard stats={stats} estimates={filteredEstimates} invoices={filteredInvoices} customers={sorted} getName={getName} onSelectEstimate={e=>setEditingEstimate(e)}/>}
           {view==='customers'  && <CustomersList customers={sorted} vehicles={vehicles} getName={getName} search={search} onSelect={c=>{setSelected(c);setModal('custDetail');}} onAdd={()=>setModal('custAdd')}/>}
           {view==='vehicles'   && <VehiclesList vehicles={vehicles} customers={sorted} getName={getName} search={search} onAdd={()=>setModal('vehAdd')}/>}
-          {view==='estimates'  && <EstimatesList estimates={filteredEstimates} customers={sorted} vehicles={vehicles} locations={locations} getName={getName} onSelect={e=>setEditingEstimate(e)} onCreate={handleNewEstimate}/>}
-          {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)}/>}
+          {view==='estimates'  && <EstimatesList estimates={filteredEstimates} customers={sorted} vehicles={vehicles} locations={locations} getName={getName} onSelect={e=>setEditingEstimate(e)} onCreate={handleNewEstimate} onDelete={e=>{if(confirm(`Delete ${e.number}? This cannot be undone.`)){setEstimates(estimates.filter(x=>x.id!==e.id));notify('Estimate deleted');}}}/>}
+          {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)} onDelete={i=>{if(confirm(`Delete ${i.number}? This cannot be undone.`)){setInvoices(invoices.filter(x=>x.id!==i.id));notify('Invoice deleted');}}}/>}
           {view==='canned'     && <CannedItemsView cannedItems={cannedItems} setCannedItems={setCannedItems} settings={settings} notify={notify}/>}
           {view==='messages'   && <MessagesView/>}
           {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
@@ -734,20 +734,73 @@ function VehiclesList({vehicles,customers,getName,search,onAdd}) {
   return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onAdd}><Plus size={16}/>Add</button></div><div className="kf-card"><table><thead><tr><th>Vehicle</th><th>VIN</th><th>Plate</th><th>Owner</th></tr></thead><tbody>{list.map(v=><tr key={v.id}><td>{v.year} {v.make} {v.model}</td><td><code>{v.vin?.slice(-8)}</code></td><td>{v.plate}</td><td>{getName(customers.find(c=>c.id===v.customerId))}</td></tr>)}</tbody></table>{list.length===0&&<div className="kf-empty"><Car size={40}/></div>}</div></div>;
 }
 
-function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,onCreate}) {
+function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,onCreate,onDelete}) {
   const [filter,setFilter]=useState('all');
   const list=estimates.filter(e=>filter==='all'||e.status===filter);
   const getLocName=id=>locations?.find(l=>l.id===id)?.name||'';
   const showLoc=locations?.length>1;
-  return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onCreate}><Zap size={16}/>New</button><div style={{flex:1}}/><div className="kf-tabs">{['all','pending','approved','converted'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div></div><div className="kf-card"><table><thead><tr><th>Estimate</th><th>Title</th><th>Customer</th><th>Vehicle</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Status</th></tr></thead><tbody>{list.map(e=>{const c=customers.find(x=>x.id===e.customerId);const v=vehicles.find(x=>x.id===e.vehicleId);return<tr key={e.id} onClick={()=>onSelect(e)}><td><strong>{e.number}</strong></td><td>{e.title||'-'}</td><td>{c?getName(c):'-'}</td><td>{v?`${v.year} ${v.make}`:'-'}</td>{showLoc&&<td><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(e.locationId)}</span></td>}<td>${(e.finalTotal||0).toFixed(2)}</td><td><span className={`kf-badge ${e.status}`}>{e.status}</span></td></tr>;})}</tbody></table>{list.length===0&&<div className="kf-empty"><FileText size={40}/></div>}</div></div>;
+  return (
+    <div>
+      <div className="kf-actions">
+        <button className="kf-btn primary" onClick={onCreate}><Zap size={16}/>New</button>
+        <div style={{flex:1}}/>
+        <div className="kf-tabs">{['all','pending','approved','converted'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div>
+      </div>
+      <div className="kf-card">
+        <table><thead><tr><th>Estimate</th><th>Title</th><th>Customer</th><th>Vehicle</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Status</th><th></th></tr></thead>
+        <tbody>{list.map(e=>{
+          const c=customers.find(x=>x.id===e.customerId);
+          const v=vehicles.find(x=>x.id===e.vehicleId);
+          return (
+            <tr key={e.id}>
+              <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}><strong>{e.number}</strong></td>
+              <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}>{e.title||'-'}</td>
+              <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}>{c?getName(c):'-'}</td>
+              <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}>{v?`${v.year} ${v.make}`:'-'}</td>
+              {showLoc&&<td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(e.locationId)}</span></td>}
+              <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}>${(e.finalTotal||0).toFixed(2)}</td>
+              <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}><span className={`kf-badge ${e.status}`}>{e.status}</span></td>
+              <td><button className="kf-icon-btn danger" onClick={ev=>{ev.stopPropagation();onDelete(e);}} title="Delete"><Trash2 size={15}/></button></td>
+            </tr>
+          );
+        })}</tbody></table>
+        {list.length===0&&<div className="kf-empty"><FileText size={40}/></div>}
+      </div>
+    </div>
+  );
 }
 
-function InvoicesList({invoices,customers,locations,getName,onSelect}) {
+function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete}) {
   const [filter,setFilter]=useState('all');
   const list=invoices.filter(i=>filter==='all'||i.status===filter);
   const getLocName=id=>locations?.find(l=>l.id===id)?.name||'';
   const showLoc=locations?.length>1;
-  return <div><div className="kf-actions"><div style={{flex:1}}/><div className="kf-tabs">{['all','unpaid','partial','paid'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div></div><div className="kf-card"><table><thead><tr><th>Invoice</th><th>Customer</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Balance</th><th>Status</th></tr></thead><tbody>{list.map(i=>{const c=customers.find(x=>x.id===i.customerId);return<tr key={i.id} onClick={()=>onSelect(i)}><td><strong>{i.number}</strong></td><td>{getName(c)}</td>{showLoc&&<td><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}<td>${(i.finalTotal||i.total).toFixed(2)}</td><td className={i.balance>0?'red':'green'}>${i.balance.toFixed(2)}</td><td><span className={`kf-badge ${i.status}`}>{i.status}</span></td></tr>;})}</tbody></table>{list.length===0&&<div className="kf-empty"><DollarSign size={40}/></div>}</div></div>;
+  return (
+    <div>
+      <div className="kf-actions">
+        <div style={{flex:1}}/>
+        <div className="kf-tabs">{['all','unpaid','partial','paid'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div>
+      </div>
+      <div className="kf-card">
+        <table><thead><tr><th>Invoice</th><th>Customer</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+        <tbody>{list.map(i=>{
+          const c=customers.find(x=>x.id===i.customerId);
+          return (
+            <tr key={i.id}>
+              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number}</strong></td>
+              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>{getName(c)}</td>
+              {showLoc&&<td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}
+              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>${(i.finalTotal||i.total).toFixed(2)}</td>
+              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className={i.balance>0?'red':'green'}>${i.balance.toFixed(2)}</td>
+              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className={`kf-badge ${i.status}`}>{i.status}</span></td>
+              <td><button className="kf-icon-btn danger" onClick={ev=>{ev.stopPropagation();onDelete(i);}} title="Delete"><Trash2 size={15}/></button></td>
+            </tr>
+          );
+        })}</tbody></table>
+        {list.length===0&&<div className="kf-empty"><DollarSign size={40}/></div>}
+      </div>
+    </div>
+  );
 }
 
 function MessagesView() {
