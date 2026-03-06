@@ -5,7 +5,8 @@ import {
   X, Save, CreditCard, Home, BarChart3, Trash2, Zap, Loader2, Send,
   Edit2, UserCog, Clock, Package, Tag, Upload, Image, File, Video,
   StickyNote, Eye, EyeOff, Camera, LogOut, Lock, User, ArrowLeft,
-  Clipboard, ChevronDown, CircleDot, Printer, Layers, FolderPlus, ChevronUp
+  Clipboard, ChevronDown, CircleDot, Printer, Layers, FolderPlus, ChevronUp,
+  MapPin, Shield, SlidersHorizontal
 } from 'lucide-react';
 
 const ITEM_TYPES = [
@@ -24,15 +25,47 @@ const DEFAULT_SETTINGS = {
   email: 'service@kaizenautomotive.com'
 };
 
+const DEFAULT_LOCATIONS = [
+  { id: 'loc1', name: 'Main Location', address: '', phone: '', email: '', laborRate: null, taxRate: null }
+];
+
 const DEFAULT_DATA = {
   customers: [],
   vehicles: [],
   estimates: [],
   invoices: [],
+  locations: DEFAULT_LOCATIONS,
   users: [
-    { id: 'u1', name: 'Admin', email: 'admin@kaizen.com', pin: '1234', role: 'admin' },
+    { id: 'u1', name: 'Admin', email: 'admin@kaizen.com', pin: '1234', role: 'admin', locationId: 'loc1' },
   ]
 };
+
+// Role hierarchy: admin > manager > tech
+const ROLES = [
+  { id: 'admin',   label: 'Admin',   desc: 'Full access, manages locations & all users' },
+  { id: 'manager', label: 'Manager', desc: 'Manages docs & users at their location' },
+  { id: 'tech',    label: 'Tech',    desc: 'Create and edit work orders' },
+];
+
+// Can a user manage another user?
+function canManageUser(actor, target) {
+  if (actor.role === 'admin') return true;
+  if (actor.role === 'manager' && target.role === 'tech' && target.locationId === actor.locationId) return true;
+  return false;
+}
+
+// Resolve effective settings for a location (location overrides fallback to global)
+function resolveSettings(globalSettings, location) {
+  if (!location) return globalSettings;
+  return {
+    ...globalSettings,
+    laborRate: location.laborRate ?? globalSettings.laborRate,
+    taxRate:   location.taxRate   ?? globalSettings.taxRate,
+    shopName:  location.name      || globalSettings.shopName,
+    phone:     location.phone     || globalSettings.phone,
+    email:     location.email     || globalSettings.email,
+  };
+}
 
 async function decodeVIN(vin) {
   try {
@@ -154,6 +187,7 @@ export default function App() {
   const [estimates, setEstimates] = useState(() => loadData('estimates', DEFAULT_DATA.estimates));
   const [invoices, setInvoices] = useState(() => loadData('invoices', DEFAULT_DATA.invoices));
   const [users, setUsers] = useState(() => loadData('users', DEFAULT_DATA.users));
+  const [locations, setLocations] = useState(() => loadData('locations', DEFAULT_DATA.locations));
   const [settings, setSettings] = useState(() => loadData('settings', DEFAULT_SETTINGS));
   const [cannedItems, setCannedItems] = useState(() => loadData('cannedItems', { categories: [], items: [] }));
   const [selected, setSelected] = useState(null);
@@ -161,6 +195,8 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState(null);
   const [editingEstimate, setEditingEstimate] = useState(null);
+  // Location filter: null = all locations (admin/manager can see all), or a locationId
+  const [locationFilter, setLocationFilter] = useState(null);
 
   // Load data from API on startup
   useEffect(() => {
@@ -171,6 +207,7 @@ export default function App() {
         if (data.estimates) setEstimates(data.estimates);
         if (data.invoices) setInvoices(data.invoices);
         if (data.users) setUsers(data.users);
+        if (data.locations) setLocations(data.locations);
         if (data.settings) setSettings(data.settings);
         if (data.cannedItems) setCannedItems(data.cannedItems);
       }
@@ -183,6 +220,7 @@ export default function App() {
   useEffect(() => { if (!isLoading) saveData('estimates', estimates); }, [estimates, isLoading]);
   useEffect(() => { if (!isLoading) saveData('invoices', invoices); }, [invoices, isLoading]);
   useEffect(() => { if (!isLoading) saveData('users', users); }, [users, isLoading]);
+  useEffect(() => { if (!isLoading) saveData('locations', locations); }, [locations, isLoading]);
   useEffect(() => { if (!isLoading) saveData('settings', settings); }, [settings, isLoading]);
   useEffect(() => { saveData('currentUser', currentUser); }, [currentUser]);
   useEffect(() => { if (!isLoading) saveData('cannedItems', cannedItems); }, [cannedItems, isLoading]);
@@ -192,15 +230,29 @@ export default function App() {
   const closeModal = () => { setModal(null); setSelected(null); };
   const sorted = [...customers].sort((a,b) => getName(a).localeCompare(getName(b)));
 
+  // Helpers
+  const getLocation = (id) => locations.find(l => l.id === id) || null;
+  const getEffectiveSettings = (locationId) => resolveSettings(settings, getLocation(locationId));
+  const activeLocationId = locationFilter; // null = all
+
+  // Filter docs by active location
+  const filteredEstimates = activeLocationId ? estimates.filter(e => e.locationId === activeLocationId) : estimates;
+  const filteredInvoices  = activeLocationId ? invoices.filter(i => i.locationId === activeLocationId)  : invoices;
+
   const stats = {
     customers: customers.length,
-    pending: estimates.filter(e => e.status === 'pending').length,
-    unpaid: invoices.filter(i => i.status !== 'paid').length,
-    revenue: invoices.filter(i => i.status === 'paid').reduce((s,i) => s + (i.finalTotal||i.total), 0)
+    pending: filteredEstimates.filter(e => e.status === 'pending').length,
+    unpaid: filteredInvoices.filter(i => i.status !== 'paid').length,
+    revenue: filteredInvoices.filter(i => i.status === 'paid').reduce((s,i) => s + (i.finalTotal||i.total), 0)
   };
 
-  const handleLogin = (user) => { setCurrentUser(user); notify(`Welcome, ${user.name}!`); };
-  const handleLogout = () => { setCurrentUser(null); setView('dashboard'); setEditingEstimate(null); };
+  const handleLogin = (user) => {
+    setCurrentUser(user);
+    // Techs default to filtered to their own location; admin/manager see all by default
+    setLocationFilter(user.role === 'tech' ? (user.locationId || null) : null);
+    notify(`Welcome, ${user.name}!`);
+  };
+  const handleLogout = () => { setCurrentUser(null); setView('dashboard'); setEditingEstimate(null); setLocationFilter(null); };
 
   // Create new BLANK estimate and open it
   // Get the next document number (finds highest existing number + 1)
@@ -219,6 +271,7 @@ export default function App() {
       id: `e${Date.now()}`,
       docNumber: docNum,  // Store raw number for pairing
       number: `EST-${String(docNum).padStart(4, '0')}`,
+      locationId: currentUser?.locationId || locations[0]?.id || null,
       customerId: null,
       vehicleId: null,
       title: '',
@@ -323,13 +376,15 @@ export default function App() {
   if (!currentUser) return <LoginScreen users={users} onLogin={handleLogin} />;
 
   if (editingEstimate) {
+    const docLocationId = editingEstimate.locationId || currentUser?.locationId || locations[0]?.id;
     return (
       <EstimatePage
         document={editingEstimate}
         customers={sorted}
         vehicles={vehicles}
         users={users}
-        settings={settings}
+        locations={locations}
+        settings={getEffectiveSettings(docLocationId)}
         cannedItems={cannedItems}
         currentUser={currentUser}
         getName={getName}
@@ -365,7 +420,7 @@ export default function App() {
           <div className="kf-avatar">{currentUser.name.charAt(0)}</div>
           <div className="kf-user-details">
             <span className="kf-user-name">{currentUser.name}</span>
-            <span className="kf-user-role">{currentUser.role}</span>
+            <span className="kf-user-role">{currentUser.role}{currentUser.locationId && getLocation(currentUser.locationId) ? ` · ${getLocation(currentUser.locationId).name}` : ''}</span>
           </div>
           <button className="kf-icon-btn" onClick={handleLogout} title="Logout"><LogOut size={18}/></button>
         </div>
@@ -374,19 +429,29 @@ export default function App() {
         <header className="kf-header">
           <h1>{navItems.find(n => n.id === view)?.label || 'Dashboard'}</h1>
           <div className="kf-header-right">
+            {/* Location filter - only show when relevant views are active */}
+            {(view === 'estimates' || view === 'invoices' || view === 'dashboard') && locations.length > 1 && currentUser.role !== 'tech' && (
+              <div className="kf-loc-filter">
+                <MapPin size={15}/>
+                <select value={locationFilter || ''} onChange={e => setLocationFilter(e.target.value || null)}>
+                  <option value="">All Locations</option>
+                  {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+            )}
             <button className="kf-header-btn" onClick={handleNewEstimate}><Zap size={18}/>New Estimate</button>
             <div className="kf-search"><Search size={18}/><input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}/></div>
           </div>
         </header>
         <div className="kf-content">
-          {view === 'dashboard' && <Dashboard stats={stats} estimates={estimates} invoices={invoices} customers={sorted} getName={getName} onSelectEstimate={e => setEditingEstimate(e)}/>}
+          {view === 'dashboard' && <Dashboard stats={stats} estimates={filteredEstimates} invoices={filteredInvoices} customers={sorted} getName={getName} onSelectEstimate={e => setEditingEstimate(e)}/>}
           {view === 'customers' && <CustomersList customers={sorted} vehicles={vehicles} getName={getName} search={search} onSelect={c => {setSelected(c);setModal('custDetail');}} onAdd={() => setModal('custAdd')}/>}
           {view === 'vehicles' && <VehiclesList vehicles={vehicles} customers={sorted} getName={getName} search={search} onAdd={() => setModal('vehAdd')}/>}
-          {view === 'estimates' && <EstimatesList estimates={estimates} customers={sorted} vehicles={vehicles} getName={getName} onSelect={e => setEditingEstimate(e)} onCreate={handleNewEstimate}/>}
-          {view === 'invoices' && <InvoicesList invoices={invoices} customers={sorted} getName={getName} onSelect={i => setEditingEstimate(i)}/>}
+          {view === 'estimates' && <EstimatesList estimates={filteredEstimates} customers={sorted} vehicles={vehicles} locations={locations} getName={getName} onSelect={e => setEditingEstimate(e)} onCreate={handleNewEstimate}/>}
+          {view === 'invoices' && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i => setEditingEstimate(i)}/>}
           {view === 'canned' && <CannedItemsView cannedItems={cannedItems} setCannedItems={setCannedItems} settings={settings} notify={notify}/>}
           {view === 'messages' && <MessagesView/>}
-          {view === 'settings' && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} currentUser={currentUser} notify={notify}/>}
+          {view === 'settings' && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} currentUser={currentUser} notify={notify}/>}
         </div>
       </main>
       {modal === 'custAdd' && <CustomerForm onClose={closeModal} onSave={c => {handleAddCustomer(c);closeModal();notify('Customer added');}}/>}
@@ -428,6 +493,7 @@ function LoginScreen({users, onLogin}) {
             <button className="kf-back-btn" onClick={() => {setSelectedUser(null);setPin('');setError('');}}><ArrowLeft size={18}/>Back</button>
             <div className="kf-avatar xl">{selectedUser.name.charAt(0)}</div>
             <h3>{selectedUser.name}</h3>
+            <div className="kf-sub" style={{textAlign:'center',marginBottom:8}}>{selectedUser.role}</div>
             {error && <div className="kf-error"><AlertCircle size={16}/>{error}</div>}
             <div className="kf-form-group">
               <label>Enter PIN</label>
@@ -459,66 +525,294 @@ function VehiclesList({vehicles, customers, getName, search, onAdd}) {
   return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onAdd}><Plus size={16}/>Add</button></div><div className="kf-card"><table><thead><tr><th>Vehicle</th><th>VIN</th><th>Plate</th><th>Owner</th></tr></thead><tbody>{list.map(v=><tr key={v.id}><td>{v.year} {v.make} {v.model}</td><td><code>{v.vin?.slice(-8)}</code></td><td>{v.plate}</td><td>{getName(customers.find(c=>c.id===v.customerId))}</td></tr>)}</tbody></table>{list.length===0&&<div className="kf-empty"><Car size={40}/></div>}</div></div>;
 }
 
-function EstimatesList({estimates, customers, vehicles, getName, onSelect, onCreate}) {
+function EstimatesList({estimates, customers, vehicles, locations, getName, onSelect, onCreate}) {
   const [filter, setFilter] = useState('all');
   const list = estimates.filter(e => filter==='all'||e.status===filter);
-  return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onCreate}><Zap size={16}/>New</button><div style={{flex:1}}/><div className="kf-tabs">{['all','pending','approved','converted'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div></div><div className="kf-card"><table><thead><tr><th>Estimate</th><th>Title</th><th>Customer</th><th>Vehicle</th><th>Total</th><th>Status</th></tr></thead><tbody>{list.map(e=>{const c=customers.find(x=>x.id===e.customerId);const v=vehicles.find(x=>x.id===e.vehicleId);return<tr key={e.id} onClick={()=>onSelect(e)}><td><strong>{e.number}</strong></td><td>{e.title||'-'}</td><td>{c?getName(c):'-'}</td><td>{v?`${v.year} ${v.make}`:'-'}</td><td>${(e.finalTotal||0).toFixed(2)}</td><td><span className={`kf-badge ${e.status}`}>{e.status}</span></td></tr>;})}</tbody></table>{list.length===0&&<div className="kf-empty"><FileText size={40}/></div>}</div></div>;
+  const getLocName = id => locations?.find(l => l.id === id)?.name || '';
+  const showLoc = locations?.length > 1;
+  return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onCreate}><Zap size={16}/>New</button><div style={{flex:1}}/><div className="kf-tabs">{['all','pending','approved','converted'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div></div><div className="kf-card"><table><thead><tr><th>Estimate</th><th>Title</th><th>Customer</th><th>Vehicle</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Status</th></tr></thead><tbody>{list.map(e=>{const c=customers.find(x=>x.id===e.customerId);const v=vehicles.find(x=>x.id===e.vehicleId);return<tr key={e.id} onClick={()=>onSelect(e)}><td><strong>{e.number}</strong></td><td>{e.title||'-'}</td><td>{c?getName(c):'-'}</td><td>{v?`${v.year} ${v.make}`:'-'}</td>{showLoc&&<td><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(e.locationId)}</span></td>}<td>${(e.finalTotal||0).toFixed(2)}</td><td><span className={`kf-badge ${e.status}`}>{e.status}</span></td></tr>;})}</tbody></table>{list.length===0&&<div className="kf-empty"><FileText size={40}/></div>}</div></div>;
 }
 
-function InvoicesList({invoices, customers, getName, onSelect}) {
+function InvoicesList({invoices, customers, locations, getName, onSelect}) {
   const [filter, setFilter] = useState('all');
   const list = invoices.filter(i => filter==='all'||i.status===filter);
-  return <div><div className="kf-actions"><div style={{flex:1}}/><div className="kf-tabs">{['all','unpaid','partial','paid'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div></div><div className="kf-card"><table><thead><tr><th>Invoice</th><th>Customer</th><th>Total</th><th>Balance</th><th>Status</th></tr></thead><tbody>{list.map(i=>{const c=customers.find(x=>x.id===i.customerId);return<tr key={i.id} onClick={()=>onSelect(i)}><td><strong>{i.number}</strong></td><td>{getName(c)}</td><td>${(i.finalTotal||i.total).toFixed(2)}</td><td className={i.balance>0?'red':'green'}>${i.balance.toFixed(2)}</td><td><span className={`kf-badge ${i.status}`}>{i.status}</span></td></tr>;})}</tbody></table>{list.length===0&&<div className="kf-empty"><DollarSign size={40}/></div>}</div></div>;
+  const getLocName = id => locations?.find(l => l.id === id)?.name || '';
+  const showLoc = locations?.length > 1;
+  return <div><div className="kf-actions"><div style={{flex:1}}/><div className="kf-tabs">{['all','unpaid','partial','paid'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div></div><div className="kf-card"><table><thead><tr><th>Invoice</th><th>Customer</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Balance</th><th>Status</th></tr></thead><tbody>{list.map(i=>{const c=customers.find(x=>x.id===i.customerId);return<tr key={i.id} onClick={()=>onSelect(i)}><td><strong>{i.number}</strong></td><td>{getName(c)}</td>{showLoc&&<td><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}<td>${(i.finalTotal||i.total).toFixed(2)}</td><td className={i.balance>0?'red':'green'}>${i.balance.toFixed(2)}</td><td><span className={`kf-badge ${i.status}`}>{i.status}</span></td></tr>;})}</tbody></table>{list.length===0&&<div className="kf-empty"><DollarSign size={40}/></div>}</div></div>;
 }
 
 function MessagesView() {
   return <div className="kf-empty" style={{height:400}}><MessageSquare size={60}/><p>Messaging coming soon</p></div>;
 }
 
-function SettingsView({settings, setSettings, users, setUsers, currentUser, notify}) {
+function SettingsView({settings, setSettings, users, setUsers, locations, setLocations, currentUser, notify}) {
   const [localSettings, setLocalSettings] = useState(settings);
-  const [newUser, setNewUser] = useState({name:'', email:'', pin:'', role:'tech'});
+  const [tab, setTab] = useState('general');
+
+  // Users state
+  const [newUser, setNewUser] = useState({name:'', email:'', pin:'', role:'tech', locationId: locations[0]?.id || ''});
   const [showAddUser, setShowAddUser] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+
+  // Locations state
+  const [newLoc, setNewLoc] = useState({name:'', address:'', phone:'', email:'', laborRate:'', taxRate:''});
+  const [showAddLoc, setShowAddLoc] = useState(false);
+  const [editingLoc, setEditingLoc] = useState(null);
+
+  const isAdmin = currentUser.role === 'admin';
+  const isManager = currentUser.role === 'manager';
 
   const saveSettings = () => { setSettings(localSettings); notify('Settings saved'); };
+
+  // --- User CRUD ---
   const addUser = () => {
     if (!newUser.name || !newUser.pin) { notify('Name and PIN required', 'error'); return; }
-    setUsers([...users, {...newUser, id: `u${Date.now()}`}]);
-    setNewUser({name:'', email:'', pin:'', role:'tech'});
+    if (isManager && newUser.role !== 'tech') { notify('Managers can only add techs', 'error'); return; }
+    const u = {...newUser, id: `u${Date.now()}`, locationId: newUser.locationId || locations[0]?.id || ''};
+    setUsers([...users, u]);
+    setNewUser({name:'', email:'', pin:'', role:'tech', locationId: locations[0]?.id || ''});
     setShowAddUser(false);
     notify('User added');
   };
+  const saveEditUser = () => {
+    if (!editingUser.name || !editingUser.pin) { notify('Name and PIN required', 'error'); return; }
+    setUsers(users.map(u => u.id === editingUser.id ? editingUser : u));
+    setEditingUser(null);
+    notify('User updated');
+  };
   const deleteUser = (id) => {
     if (id === currentUser.id) { notify('Cannot delete yourself', 'error'); return; }
+    const target = users.find(u => u.id === id);
+    if (!canManageUser(currentUser, target)) { notify('Permission denied', 'error'); return; }
     if (confirm('Delete user?')) { setUsers(users.filter(u => u.id !== id)); notify('Deleted'); }
   };
 
-  return <div className="kf-settings">
-    <div className="kf-settings-grid">
-      <div className="kf-card">
-        <h3><DollarSign size={20}/> Rates</h3>
-        <div className="kf-form-group"><label>Labor Rate ($/hr)</label><input type="text" inputMode="decimal" value={localSettings.laborRate} onChange={e => setLocalSettings({...localSettings, laborRate: parseFloat(e.target.value) || 0})}/></div>
-        <div className="kf-form-group"><label>Tax Rate (%)</label><input type="text" inputMode="decimal" value={localSettings.taxRate} onChange={e => setLocalSettings({...localSettings, taxRate: parseFloat(e.target.value) || 0})}/></div>
-        <button className="kf-btn primary" onClick={saveSettings}><Save size={16}/>Save</button>
+  // --- Location CRUD (admin only) ---
+  const addLoc = () => {
+    if (!newLoc.name) { notify('Location name required', 'error'); return; }
+    const l = {
+      ...newLoc,
+      id: `loc${Date.now()}`,
+      laborRate: newLoc.laborRate !== '' ? parseFloat(newLoc.laborRate) : null,
+      taxRate: newLoc.taxRate !== '' ? parseFloat(newLoc.taxRate) : null,
+    };
+    setLocations([...locations, l]);
+    setNewLoc({name:'', address:'', phone:'', email:'', laborRate:'', taxRate:''});
+    setShowAddLoc(false);
+    notify('Location added');
+  };
+  const saveEditLoc = () => {
+    const updated = {
+      ...editingLoc,
+      laborRate: editingLoc.laborRate !== '' && editingLoc.laborRate !== null ? parseFloat(editingLoc.laborRate) : null,
+      taxRate: editingLoc.taxRate !== '' && editingLoc.taxRate !== null ? parseFloat(editingLoc.taxRate) : null,
+    };
+    setLocations(locations.map(l => l.id === updated.id ? updated : l));
+    setEditingLoc(null);
+    notify('Location updated');
+  };
+  const deleteLoc = (id) => {
+    if (locations.length <= 1) { notify('Cannot delete last location', 'error'); return; }
+    if (users.some(u => u.locationId === id)) { notify('Reassign users before deleting', 'error'); return; }
+    if (confirm('Delete location?')) { setLocations(locations.filter(l => l.id !== id)); notify('Deleted'); }
+  };
+
+  const visibleUsers = isAdmin ? users : users.filter(u => u.locationId === currentUser.locationId);
+  const canAddUser = isAdmin || isManager;
+
+  const roleIcon = (role) => role === 'admin' ? <Shield size={13}/> : role === 'manager' ? <UserCog size={13}/> : <Wrench size={13}/>;
+
+  return (
+    <div className="kf-settings">
+      <div className="kf-settings-tabs">
+        <button className={tab==='general'?'active':''} onClick={()=>setTab('general')}><SlidersHorizontal size={16}/>General</button>
+        {isAdmin && <button className={tab==='locations'?'active':''} onClick={()=>setTab('locations')}><MapPin size={16}/>Locations</button>}
+        <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}><Users size={16}/>Users</button>
+        {isAdmin && <button className={tab==='data'?'active':''} onClick={()=>setTab('data')}><Trash2 size={16}/>Data</button>}
       </div>
-      <div className="kf-card">
-        <h3><Building2 size={20}/> Business</h3>
-        <div className="kf-form-group"><label>Shop Name</label><input value={localSettings.shopName} onChange={e => setLocalSettings({...localSettings, shopName: e.target.value})}/></div>
-        <div className="kf-form-group"><label>Phone</label><input value={localSettings.phone} onChange={e => setLocalSettings({...localSettings, phone: e.target.value})}/></div>
-        <button className="kf-btn primary" onClick={saveSettings}><Save size={16}/>Save</button>
-      </div>
-      <div className="kf-card wide">
-        <div className="kf-section-header"><h3><Users size={20}/> Users</h3>{currentUser.role === 'admin' && <button className="kf-btn primary sm" onClick={() => setShowAddUser(true)}><Plus size={14}/>Add</button>}</div>
-        {showAddUser && <div className="kf-add-user-form"><div className="kf-row"><div className="kf-form-group"><label>Name *</label><input value={newUser.name} onChange={e => setNewUser({...newUser, name: e.target.value})}/></div><div className="kf-form-group"><label>PIN *</label><input type="password" maxLength={6} value={newUser.pin} onChange={e => setNewUser({...newUser, pin: e.target.value})}/></div><div className="kf-form-group"><label>Role</label><select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}><option value="tech">Tech</option><option value="admin">Admin</option></select></div></div><div className="kf-row"><button className="kf-btn secondary" onClick={() => setShowAddUser(false)}>Cancel</button><button className="kf-btn primary" onClick={addUser}><Save size={16}/>Add</button></div></div>}
-        <div className="kf-users-list">{users.map(u => <div key={u.id} className="kf-user-row"><div className="kf-avatar">{u.name.charAt(0)}</div><div className="kf-user-info"><div className="kf-name">{u.name} {u.id === currentUser.id && <span className="kf-badge">You</span>}</div><div className="kf-sub">{u.role}</div></div>{currentUser.role === 'admin' && u.id !== currentUser.id && <button className="kf-icon-btn danger" onClick={() => deleteUser(u.id)}><Trash2 size={16}/></button>}</div>)}</div>
-      </div>
-      <div className="kf-card">
-        <h3><Trash2 size={20}/> Data</h3>
-        <p className="kf-sub">Clear all data.</p>
-        <button className="kf-btn secondary" style={{marginTop:12}} onClick={()=>{if(confirm('Delete ALL?')){localStorage.clear();location.reload();}}}><Trash2 size={16}/>Clear</button>
-      </div>
+
+      {tab === 'general' && (
+        <div className="kf-settings-grid">
+          <div className="kf-card">
+            <h3><DollarSign size={20}/> Default Rates</h3>
+            <p className="kf-sub" style={{marginBottom:12}}>Used when a location has no override set.</p>
+            <div className="kf-form-group"><label>Labor Rate ($/hr)</label><input type="text" inputMode="decimal" value={localSettings.laborRate} onChange={e => setLocalSettings({...localSettings, laborRate: parseFloat(e.target.value) || 0})}/></div>
+            <div className="kf-form-group"><label>Tax Rate (%)</label><input type="text" inputMode="decimal" value={localSettings.taxRate} onChange={e => setLocalSettings({...localSettings, taxRate: parseFloat(e.target.value) || 0})}/></div>
+            <button className="kf-btn primary" onClick={saveSettings}><Save size={16}/>Save</button>
+          </div>
+          <div className="kf-card">
+            <h3><Building2 size={20}/> Business</h3>
+            <div className="kf-form-group"><label>Shop Name</label><input value={localSettings.shopName} onChange={e => setLocalSettings({...localSettings, shopName: e.target.value})}/></div>
+            <div className="kf-form-group"><label>Phone</label><input value={localSettings.phone} onChange={e => setLocalSettings({...localSettings, phone: e.target.value})}/></div>
+            <div className="kf-form-group"><label>Email</label><input value={localSettings.email || ''} onChange={e => setLocalSettings({...localSettings, email: e.target.value})}/></div>
+            <button className="kf-btn primary" onClick={saveSettings}><Save size={16}/>Save</button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'locations' && isAdmin && (
+        <div className="kf-card wide">
+          <div className="kf-section-header">
+            <h3><MapPin size={20}/> Locations</h3>
+            <button className="kf-btn primary sm" onClick={() => setShowAddLoc(true)}><Plus size={14}/>Add Location</button>
+          </div>
+          <p className="kf-sub" style={{marginBottom:16}}>Each location can override global labor rate and tax rate. Leave blank to use global defaults.</p>
+
+          {showAddLoc && (
+            <div className="kf-loc-form">
+              <div className="kf-row">
+                <div className="kf-form-group"><label>Name *</label><input value={newLoc.name} onChange={e=>setNewLoc({...newLoc,name:e.target.value})} placeholder="e.g. Lynnwood"/></div>
+                <div className="kf-form-group"><label>Phone</label><input value={newLoc.phone} onChange={e=>setNewLoc({...newLoc,phone:e.target.value})}/></div>
+              </div>
+              <div className="kf-row">
+                <div className="kf-form-group"><label>Address</label><input value={newLoc.address} onChange={e=>setNewLoc({...newLoc,address:e.target.value})}/></div>
+                <div className="kf-form-group"><label>Email</label><input value={newLoc.email} onChange={e=>setNewLoc({...newLoc,email:e.target.value})}/></div>
+              </div>
+              <div className="kf-row">
+                <div className="kf-form-group"><label>Labor Rate Override ($/hr)</label><input type="number" placeholder={`Default: $${settings.laborRate}`} value={newLoc.laborRate} onChange={e=>setNewLoc({...newLoc,laborRate:e.target.value})}/></div>
+                <div className="kf-form-group"><label>Tax Rate Override (%)</label><input type="number" placeholder={`Default: ${settings.taxRate}%`} value={newLoc.taxRate} onChange={e=>setNewLoc({...newLoc,taxRate:e.target.value})}/></div>
+              </div>
+              <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setShowAddLoc(false)}>Cancel</button><button className="kf-btn primary" onClick={addLoc}><Save size={16}/>Add</button></div>
+            </div>
+          )}
+
+          <div className="kf-loc-list">
+            {locations.map(loc => (
+              <div key={loc.id} className="kf-loc-row">
+                {editingLoc?.id === loc.id ? (
+                  <div className="kf-loc-edit">
+                    <div className="kf-row">
+                      <div className="kf-form-group"><label>Name *</label><input value={editingLoc.name} onChange={e=>setEditingLoc({...editingLoc,name:e.target.value})}/></div>
+                      <div className="kf-form-group"><label>Phone</label><input value={editingLoc.phone||''} onChange={e=>setEditingLoc({...editingLoc,phone:e.target.value})}/></div>
+                    </div>
+                    <div className="kf-row">
+                      <div className="kf-form-group"><label>Address</label><input value={editingLoc.address||''} onChange={e=>setEditingLoc({...editingLoc,address:e.target.value})}/></div>
+                      <div className="kf-form-group"><label>Email</label><input value={editingLoc.email||''} onChange={e=>setEditingLoc({...editingLoc,email:e.target.value})}/></div>
+                    </div>
+                    <div className="kf-row">
+                      <div className="kf-form-group"><label>Labor Rate Override</label><input type="number" placeholder={`Global: $${settings.laborRate}`} value={editingLoc.laborRate ?? ''} onChange={e=>setEditingLoc({...editingLoc,laborRate:e.target.value})}/></div>
+                      <div className="kf-form-group"><label>Tax Rate Override</label><input type="number" placeholder={`Global: ${settings.taxRate}%`} value={editingLoc.taxRate ?? ''} onChange={e=>setEditingLoc({...editingLoc,taxRate:e.target.value})}/></div>
+                    </div>
+                    <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setEditingLoc(null)}>Cancel</button><button className="kf-btn primary" onClick={saveEditLoc}><Save size={16}/>Save</button></div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="kf-loc-icon"><MapPin size={20}/></div>
+                    <div className="kf-loc-info">
+                      <div className="kf-name">{loc.name}</div>
+                      <div className="kf-sub">
+                        {loc.address && <span>{loc.address}</span>}
+                        {loc.phone && <span> · {loc.phone}</span>}
+                        {(loc.laborRate != null || loc.taxRate != null) && (
+                          <span className="kf-loc-overrides">
+                            {loc.laborRate != null && ` · Labor: $${loc.laborRate}/hr`}
+                            {loc.taxRate != null && ` · Tax: ${loc.taxRate}%`}
+                          </span>
+                        )}
+                        {loc.laborRate == null && loc.taxRate == null && <span className="kf-loc-overrides"> · Using global rates</span>}
+                      </div>
+                    </div>
+                    <div className="kf-loc-actions">
+                      <span className="kf-sub">{users.filter(u=>u.locationId===loc.id).length} users</span>
+                      <button className="kf-icon-btn" onClick={()=>setEditingLoc({...loc,laborRate:loc.laborRate??'',taxRate:loc.taxRate??''})}><Edit2 size={15}/></button>
+                      {locations.length > 1 && <button className="kf-icon-btn danger" onClick={()=>deleteLoc(loc.id)}><Trash2 size={15}/></button>}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'users' && (
+        <div className="kf-card wide">
+          <div className="kf-section-header">
+            <h3><Users size={20}/> Users</h3>
+            {canAddUser && <button className="kf-btn primary sm" onClick={() => setShowAddUser(true)}><Plus size={14}/>Add User</button>}
+          </div>
+
+          {showAddUser && (
+            <div className="kf-add-user-form">
+              <div className="kf-row">
+                <div className="kf-form-group"><label>Name *</label><input value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})}/></div>
+                <div className="kf-form-group"><label>PIN *</label><input type="password" maxLength={6} value={newUser.pin} onChange={e=>setNewUser({...newUser,pin:e.target.value})}/></div>
+              </div>
+              <div className="kf-row">
+                <div className="kf-form-group"><label>Role</label>
+                  <select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})}>
+                    {ROLES.filter(r => isAdmin || r.id === 'tech').map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+                  </select>
+                </div>
+                <div className="kf-form-group"><label>Location</label>
+                  <select value={newUser.locationId} onChange={e=>setNewUser({...newUser,locationId:e.target.value})}>
+                    {(isAdmin ? locations : locations.filter(l=>l.id===currentUser.locationId)).map(l=><option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="kf-form-group"><label>Email</label><input value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})}/></div>
+              <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setShowAddUser(false)}>Cancel</button><button className="kf-btn primary" onClick={addUser}><Save size={16}/>Add</button></div>
+            </div>
+          )}
+
+          <div className="kf-users-list">
+            {visibleUsers.map(u => {
+              const userLoc = locations.find(l => l.id === u.locationId);
+              const canEdit = isAdmin || (isManager && u.role === 'tech' && u.locationId === currentUser.locationId);
+              return (
+                <div key={u.id} className="kf-user-row">
+                  {editingUser?.id === u.id ? (
+                    <div className="kf-user-edit" style={{width:'100%'}}>
+                      <div className="kf-row">
+                        <div className="kf-form-group"><label>Name *</label><input value={editingUser.name} onChange={e=>setEditingUser({...editingUser,name:e.target.value})}/></div>
+                        <div className="kf-form-group"><label>PIN *</label><input type="password" maxLength={6} value={editingUser.pin} onChange={e=>setEditingUser({...editingUser,pin:e.target.value})}/></div>
+                      </div>
+                      <div className="kf-row">
+                        <div className="kf-form-group"><label>Role</label>
+                          <select value={editingUser.role} onChange={e=>setEditingUser({...editingUser,role:e.target.value})}>
+                            {ROLES.filter(r => isAdmin || r.id === 'tech').map(r=><option key={r.id} value={r.id}>{r.label}</option>)}
+                          </select>
+                        </div>
+                        <div className="kf-form-group"><label>Location</label>
+                          <select value={editingUser.locationId||''} onChange={e=>setEditingUser({...editingUser,locationId:e.target.value})}>
+                            {(isAdmin ? locations : locations.filter(l=>l.id===currentUser.locationId)).map(l=><option key={l.id} value={l.id}>{l.name}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setEditingUser(null)}>Cancel</button><button className="kf-btn primary" onClick={saveEditUser}><Save size={16}/>Save</button></div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="kf-avatar">{u.name.charAt(0)}</div>
+                      <div className="kf-user-info">
+                        <div className="kf-name">{u.name} {u.id === currentUser.id && <span className="kf-badge">You</span>}</div>
+                        <div className="kf-sub kf-user-meta">
+                          <span className={`kf-role-tag ${u.role}`}>{roleIcon(u.role)}{u.role}</span>
+                          {userLoc && <span className="kf-loc-tag"><MapPin size={11}/>{userLoc.name}</span>}
+                        </div>
+                      </div>
+                      <div className="kf-user-actions">
+                        {canEdit && <button className="kf-icon-btn" onClick={()=>setEditingUser({...u})}><Edit2 size={15}/></button>}
+                        {canEdit && u.id !== currentUser.id && <button className="kf-icon-btn danger" onClick={()=>deleteUser(u.id)}><Trash2 size={15}/></button>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === 'data' && isAdmin && (
+        <div className="kf-card">
+          <h3><Trash2 size={20}/> Data</h3>
+          <p className="kf-sub">Clear all data. This cannot be undone.</p>
+          <button className="kf-btn secondary" style={{marginTop:12}} onClick={()=>{if(confirm('Delete ALL data?')){localStorage.clear();location.reload();}}}><Trash2 size={16}/>Clear All Data</button>
+        </div>
+      )}
     </div>
-  </div>;
+  );
 }
 
 function CannedItemsView({cannedItems, setCannedItems, settings, notify}) {
