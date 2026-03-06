@@ -237,7 +237,7 @@ function SuperAdminConsole({ onExit }) {
                 </div>
                 <div className="kf-row">
                   <div className="kf-form-group"><label>Master Admin Name *</label><input value={form.masterAdminName} onChange={e=>setForm({...form,masterAdminName:e.target.value})}/></div>
-                  <div className="kf-form-group"><label>Master Admin PIN *</label><input type="password" maxLength={6} value={form.masterAdminPin} onChange={e=>setForm({...form,masterAdminPin:e.target.value})}/></div>
+                  <div className="kf-form-group"><label>Master Admin Password *</label><input type="password" value={form.masterAdminPin} onChange={e=>setForm({...form,masterAdminPin:e.target.value})}/></div>
                 </div>
                 <div className="kf-form-group"><label>Master Admin Email</label><input value={form.masterAdminEmail} onChange={e=>setForm({...form,masterAdminEmail:e.target.value})}/></div>
                 <div className="kf-row" style={{marginTop:8}}><button className="kf-btn secondary" onClick={()=>setShowCreate(false)}>Cancel</button><button className="kf-btn primary" onClick={createCompany}><Save size={16}/>Create Company</button></div>
@@ -325,135 +325,64 @@ function SuperAdminConsole({ onExit }) {
 }
 
 // ─── Unified Login Screen ─────────────────────────────────────────────────────
-// Single screen: shows Super Admin + all company users in one flat list.
-// Super Admin uses username+password; company users use PIN.
 function UnifiedLogin({ onLoginUser, onLoginSuperAdmin }) {
-  const [companies, setCompanies] = useState([]);
-  const [companyUsers, setCompanyUsers] = useState([]); // [{user, company}]
-  const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState(null); // {type:'superadmin'} | {type:'user', user, company}
-  const [pin, setPin] = useState('');
-  const [saUsername, setSaUsername] = useState('');
-  const [saPassword, setSaPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/companies`);
-        const cos = res.ok ? await res.json() : [];
-        setCompanies(cos);
-        // Load users for each company
-        const allUsers = [];
-        await Promise.all(cos.map(async c => {
-          try {
-            const r = await fetch(`${API_URL}/api/company/${c.id}/data/users`);
-            if (r.ok) {
-              const d = await r.json();
-              (d.value || []).forEach(u => allUsers.push({ user: u, company: c }));
-            }
-          } catch {}
-        }));
-        setCompanyUsers(allUsers);
-      } catch {}
-      setLoading(false);
-    };
-    load();
-  }, []);
-
-  const handleSelectUser = (entry) => { setSelected(entry); setPin(''); setSaUsername(''); setSaPassword(''); setError(''); };
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
-    if (!selected) return;
-    setLoggingIn(true); setError('');
-    if (selected.type === 'superadmin') {
-      try {
-        const res = await fetch(`${API_URL}/api/superadmin/login`, {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ username: saUsername, password: saPassword })
-        });
-        if (res.ok) { const d = await res.json(); localStorage.setItem('kf_sa_session', JSON.stringify({id:d.id,username:d.username})); onLoginSuperAdmin(); }
-        else { setError('Invalid credentials'); }
-      } catch { setError('Connection error'); }
-    } else {
-      if (selected.user.pin === pin) { onLoginUser(selected.user, selected.company); }
-      else { setError('Incorrect PIN'); setPin(''); }
-    }
-    setLoggingIn(false);
-  };
+    if (!email || !password) { setError('Email and password required'); return; }
+    setLoading(true); setError('');
 
-  const isSA = selected?.type === 'superadmin';
+    // 1. Try super admin (username field accepts email too)
+    try {
+      const res = await fetch(`${API_URL}/api/superadmin/login`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ username: email, password })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        localStorage.setItem('kf_sa_session', JSON.stringify({id: d.id, username: d.username}));
+        setLoading(false); onLoginSuperAdmin(); return;
+      }
+    } catch {}
+
+    // 2. Try company users
+    try {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email, password })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setLoading(false); onLoginUser(d.user, d.company); return;
+      }
+    } catch {}
+
+    setError('Invalid email or password');
+    setLoading(false);
+  };
 
   return (
     <div className="kf-login">
       <div className="kf-login-box">
         <div className="kf-login-header"><CircleDot size={40}/><h1>Komando</h1><p>Shop Management</p></div>
-
-        {!selected ? (
-          <>
-            {loading ? <div style={{textAlign:'center',padding:24}}><Loader2 size={28} className="spin"/></div> : (
-              <div className="kf-login-users">
-                {/* Super Admin entry */}
-                <button className="kf-login-user kf-login-sa" onClick={()=>setSelected({type:'superadmin'})}>
-                  <div className="kf-avatar lg sa"><Shield size={18}/></div>
-                  <div><div className="kf-name">Super Admin</div><div className="kf-sub">System Administrator</div></div>
-                  <ChevronRight size={20}/>
-                </button>
-
-                {companyUsers.length > 0 && <div className="kf-login-divider">Company Users</div>}
-
-                {companyUsers.map(({user, company}, i) => (
-                  <button key={`${company.id}-${user.id}`} className="kf-login-user" onClick={()=>handleSelectUser({type:'user', user, company})}>
-                    <div className="kf-avatar lg">{user.name.charAt(0)}</div>
-                    <div>
-                      <div className="kf-name">{user.name}</div>
-                      <div className="kf-sub">{user.role.replace('_',' ')} · {company.name}</div>
-                    </div>
-                    <ChevronRight size={20}/>
-                  </button>
-                ))}
-
-                {companyUsers.length === 0 && !loading && (
-                  <div style={{textAlign:'center',padding:'12px 0',color:'var(--text-dim)',fontSize:'0.85rem'}}>No company users yet.</div>
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <div className="kf-login-pin">
-            <button className="kf-back-btn" onClick={()=>{setSelected(null);setError('');}}><ArrowLeft size={18}/>Back</button>
-            <div className={`kf-avatar xl${isSA?' sa':''}`}>{isSA ? <Shield size={28}/> : selected.user.name.charAt(0)}</div>
-            <h3>{isSA ? 'Super Admin' : selected.user.name}</h3>
-            <div className="kf-sub" style={{textAlign:'center',marginBottom:12}}>
-              {isSA ? 'System Administrator' : `${selected.user.role.replace('_',' ')} · ${selected.company.name}`}
-            </div>
-            {error && <div className="kf-error"><AlertCircle size={16}/>{error}</div>}
-
-            {isSA ? (
-              <>
-                <div className="kf-form-group"><label>Username</label><input value={saUsername} onChange={e=>setSaUsername(e.target.value)} style={{letterSpacing:'normal',fontSize:'1rem',textAlign:'left'}} autoFocus/></div>
-                <div className="kf-form-group"><label>Password</label><input type="password" value={saPassword} onChange={e=>setSaPassword(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()} style={{letterSpacing:'normal',fontSize:'1rem',textAlign:'left'}}/></div>
-              </>
-            ) : (
-              <div className="kf-form-group"><label>Enter PIN</label>
-                <input type="password" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()} placeholder="••••" autoFocus/>
-              </div>
-            )}
-            <button className="kf-btn primary full" onClick={handleLogin} disabled={loggingIn}>
-              {loggingIn ? <Loader2 size={16} className="spin"/> : <Lock size={16}/>}Login
-            </button>
-          </div>
-        )}
+        <div className="kf-form-group"><label>Email</label>
+          <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()} placeholder="you@company.com" autoFocus/>
+        </div>
+        <div className="kf-form-group"><label>Password</label>
+          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()} placeholder="••••••••"/>
+        </div>
+        {error && <div className="kf-error"><AlertCircle size={16}/>{error}</div>}
+        <button className="kf-btn primary full" onClick={handleLogin} disabled={loading} style={{marginTop:8}}>
+          {loading ? <Loader2 size={16} className="spin"/> : <Lock size={16}/>}Sign In
+        </button>
       </div>
     </div>
   );
 }
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
-export default function App() {
-  // Auth state
-  const [screen, setScreen] = useState('login'); // 'login' | 'app' | 'superadmin'
   const [selectedCompany, setSelectedCompany] = useState(() => { try { return JSON.parse(localStorage.getItem('kf_company') || 'null'); } catch { return null; }});
   const [currentUser, setCurrentUser] = useState(() => { try { return JSON.parse(localStorage.getItem('kf_currentUser') || 'null'); } catch { return null; }});
 
@@ -748,7 +677,7 @@ function MessagesView() {
 function SettingsView({settings,setSettings,users,setUsers,locations,setLocations,currentUser,company,notify}) {
   const [localSettings,setLocalSettings]=useState(settings);
   const [tab,setTab]=useState('general');
-  const [newUser,setNewUser]=useState({name:'',email:'',pin:'',role:'technician',locationId:locations[0]?.id||''});
+  const [newUser,setNewUser]=useState({name:'',email:'',password:'',role:'technician',locationId:locations[0]?.id||''});
   const [showAddUser,setShowAddUser]=useState(false);
   const [editingUser,setEditingUser]=useState(null);
   const [newLoc,setNewLoc]=useState({name:'',address:'',phone:'',email:'',laborRate:'',taxRate:''});
@@ -762,15 +691,18 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
   const saveSettings=()=>{setSettings(localSettings);notify('Settings saved');};
 
   const addUser=()=>{
-    if(!newUser.name||!newUser.pin){notify('Name and PIN required','error');return;}
+    if(!newUser.name||!newUser.email||!newUser.password){notify('Name, email and password required','error');return;}
     if(!isMaster&&newUser.role!=='technician'){notify('Admins can only add technicians','error');return;}
     const u={...newUser,id:`u${Date.now()}`,companyId:company?.id};
-    setUsers([...users,u]);setNewUser({name:'',email:'',pin:'',role:'technician',locationId:locations[0]?.id||''});
+    setUsers([...users,u]);setNewUser({name:'',email:'',password:'',role:'technician',locationId:locations[0]?.id||''});
     setShowAddUser(false);notify('User added');
   };
   const saveEditUser=()=>{
-    if(!editingUser.name||!editingUser.pin){notify('Name and PIN required','error');return;}
-    setUsers(users.map(u=>u.id===editingUser.id?editingUser:u));setEditingUser(null);notify('User updated');
+    if(!editingUser.name||!editingUser.email){notify('Name and email required','error');return;}
+    const updated = {...editingUser};
+    if (editingUser.newPassword) updated.password = editingUser.newPassword;
+    delete updated.newPassword;
+    setUsers(users.map(u=>u.id===updated.id?updated:u));setEditingUser(null);notify('User updated');
   };
   const deleteUser=(id)=>{
     if(id===currentUser.id){notify('Cannot delete yourself','error');return;}
@@ -876,7 +808,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
           <div className="kf-section-header"><h3><Users size={20}/> Users</h3><button className="kf-btn primary sm" onClick={()=>setShowAddUser(true)}><Plus size={14}/>Add User</button></div>
           {showAddUser&&(
             <div className="kf-add-user-form">
-              <div className="kf-row"><div className="kf-form-group"><label>Name *</label><input value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})}/></div><div className="kf-form-group"><label>PIN *</label><input type="password" maxLength={6} value={newUser.pin} onChange={e=>setNewUser({...newUser,pin:e.target.value})}/></div></div>
+              <div className="kf-row"><div className="kf-form-group"><label>Name *</label><input value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})}/></div><div className="kf-form-group"><label>Password *</label><input type="password" value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})}/></div></div>
               <div className="kf-row">
                 <div className="kf-form-group"><label>Role</label><select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})}>{availableRoles.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select></div>
                 <div className="kf-form-group"><label>Location</label><select value={newUser.locationId} onChange={e=>setNewUser({...newUser,locationId:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
@@ -892,7 +824,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
               <div key={u.id} className="kf-user-row">
                 {editingUser?.id===u.id?(
                   <div className="kf-user-edit" style={{width:'100%'}}>
-                    <div className="kf-row"><div className="kf-form-group"><label>Name *</label><input value={editingUser.name} onChange={e=>setEditingUser({...editingUser,name:e.target.value})}/></div><div className="kf-form-group"><label>PIN *</label><input type="password" maxLength={6} value={editingUser.pin} onChange={e=>setEditingUser({...editingUser,pin:e.target.value})}/></div></div>
+                    <div className="kf-row"><div className="kf-form-group"><label>Name *</label><input value={editingUser.name} onChange={e=>setEditingUser({...editingUser,name:e.target.value})}/></div><div className="kf-form-group"><label>New Password <span className="kf-sub">(blank = keep)</span></label><input type="password" value={editingUser.newPassword||''} onChange={e=>setEditingUser({...editingUser,newPassword:e.target.value})} placeholder="••••••••"/></div></div>
                     <div className="kf-row"><div className="kf-form-group"><label>Role</label><select value={editingUser.role} onChange={e=>setEditingUser({...editingUser,role:e.target.value})}>{availableRoles.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select></div><div className="kf-form-group"><label>Location</label><select value={editingUser.locationId||''} onChange={e=>setEditingUser({...editingUser,locationId:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></div></div>
                     <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setEditingUser(null)}>Cancel</button><button className="kf-btn primary" onClick={saveEditUser}><Save size={16}/>Save</button></div>
                   </div>
