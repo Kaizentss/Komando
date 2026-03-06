@@ -52,6 +52,21 @@ function calcItemTotal(item, laborRate) {
   return 0;
 }
 
+// Compute total discount dollars for a set of items given a customer's discount config
+// customer.discount = percentage (e.g. 25), customer.discountAppliesTo = {labor,parts,fees}
+function calcDiscountAmount(items, laborRate, customer) {
+  if (!customer?.discount || parseFloat(customer.discount) <= 0) return 0;
+  const pct = parseFloat(customer.discount) / 100;
+  const applies = customer.discountAppliesTo || { labor: true, parts: true, fees: true };
+  return items.reduce((sum, item) => {
+    const total = calcItemTotal(item, laborRate);
+    if (item.type === 'labor' && applies.labor) return sum + total * pct;
+    if (item.type === 'part'  && applies.parts) return sum + total * pct;
+    if (item.type === 'fee'   && applies.fees)  return sum + total * pct;
+    return sum;
+  }, 0);
+}
+
 // ─── VIN Decoder ──────────────────────────────────────────────────────────────
 async function decodeVIN(vin) {
   try {
@@ -1098,7 +1113,7 @@ function CannedItemsView({cannedItems, setCannedItems, settings, notify}) {
 
 function CustomerForm({onClose, onSave}) {
   const [type,setType]=useState('public');
-  const [f,setF]=useState({firstName:'',lastName:'',companyName:'',contactName:'',email:'',phone:'',discount:'',taxExempt:false});
+  const [f,setF]=useState({firstName:'',lastName:'',companyName:'',contactName:'',email:'',phone:'',discount:'',discountAppliesTo:{labor:true,parts:true,fees:true},taxExempt:false});
   return (
     <div className="kf-overlay" onClick={onClose}>
       <div className="kf-modal" onClick={e=>e.stopPropagation()}>
@@ -1119,8 +1134,8 @@ function CustomerForm({onClose, onSave}) {
             </div>
             <div className="kf-row">
               <div className="kf-form-group">
-                <label>Discount ($)</label>
-                <input type="number" min="0" step="0.01" placeholder="e.g. 25.00" value={f.discount} onChange={e=>setF({...f,discount:e.target.value})}/>
+                <label>Discount (%)</label>
+                <input type="number" min="0" max="100" step="0.5" placeholder="e.g. 25" value={f.discount} onChange={e=>setF({...f,discount:e.target.value})}/>
               </div>
               <div className="kf-form-group kf-toggle-group">
                 <label>Tax Exempt</label>
@@ -1130,6 +1145,19 @@ function CustomerForm({onClose, onSave}) {
                 </div>
               </div>
             </div>
+            {f.discount > 0 && (
+              <div className="kf-form-group">
+                <label>Apply Discount To</label>
+                <div className="kf-discount-toggles">
+                  {[['labor','Labor'],['parts','Parts'],['fees','Fees']].map(([key,label]) => (
+                    <div key={key} className={`kf-disc-toggle ${f.discountAppliesTo[key]?'on':''}`}
+                      onClick={()=>setF({...f,discountAppliesTo:{...f.discountAppliesTo,[key]:!f.discountAppliesTo[key]}})}>
+                      {label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="kf-modal-footer">
             <button type="button" className="kf-btn secondary" onClick={onClose}>Cancel</button>
@@ -1167,6 +1195,7 @@ function InvoiceDetail({invoice, customer, vehicle, settings, getName, onClose, 
     const printWindow = window.open('', '_blank');
     const subtotal = invoice.subtotal || invoice.total || 0;
     const discount = invoice.discount || 0;
+    const discPct = customer?.discount || 0;
     const tax = invoice.tax || 0;
     const finalTotal = invoice.finalTotal || invoice.total || 0;
     
@@ -1280,7 +1309,7 @@ function InvoiceDetail({invoice, customer, vehicle, settings, getName, onClose, 
 
         <div class="totals">
           <div class="total-row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
-          ${discount > 0 ? `<div class="total-row"><span>Discount</span><span>-$${discount.toFixed(2)}</span></div>` : ''}
+          ${discount > 0 ? `<div class="total-row"><span>Discount (${discPct}%)</span><span>-$${discount.toFixed(2)}</span></div>` : ''}
           ${customer?.taxExempt ? `<div class="total-row" style="color:#2d936c"><span>Tax</span><span>Exempt</span></div>` : `<div class="total-row"><span>Tax (${invoice.taxRate || settings.taxRate}%)</span><span>$${tax.toFixed(2)}</span></div>`}
           <div class="total-row final"><span>Total</span><span>$${finalTotal.toFixed(2)}</span></div>
           <div class="total-row balance"><span>Balance Due</span><span>$${invoice.balance.toFixed(2)}</span></div>
@@ -1315,7 +1344,7 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
   const [plate, setPlate] = useState('');
   const [plateState, setPlateState] = useState('WA');
   const [newVeh, setNewVeh] = useState({year:'',make:'',model:'',vin:'',plate:'',plateState:'WA',engine:'',engineModel:'',transmission:''});
-  const [newCust, setNewCust] = useState({type:'public',firstName:'',lastName:'',companyName:'',contactName:'',phones:[''],emails:[''],discount:'',taxExempt:false});
+  const [newCust, setNewCust] = useState({type:'public',firstName:'',lastName:'',companyName:'',contactName:'',phones:[''],emails:[''],discount:'',discountAppliesTo:{labor:true,parts:true,fees:true},taxExempt:false});
   const [editCust, setEditCust] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedPhone, setSelectedPhone] = useState(0);
@@ -1378,10 +1407,10 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
     const phones = newCust.phones.filter(p => p.trim());
     const emails = newCust.emails.filter(e => e.trim());
     const discount = newCust.discount !== '' ? parseFloat(newCust.discount) : undefined;
-    const cust = onAddCustomer({...newCust, phones, emails, phone: phones[0] || '', email: emails[0] || '', discount, taxExempt: newCust.taxExempt || false});
+    const cust = onAddCustomer({...newCust, phones, emails, phone: phones[0] || '', email: emails[0] || '', discount, discountAppliesTo: newCust.discountAppliesTo, taxExempt: newCust.taxExempt || false});
     onSelectCustomer(cust.id);
     setShowAddCust(false);
-    setNewCust({type:'public',firstName:'',lastName:'',companyName:'',contactName:'',phones:[''],emails:[''],discount:'',taxExempt:false});
+    setNewCust({type:'public',firstName:'',lastName:'',companyName:'',contactName:'',phones:[''],emails:[''],discount:'',discountAppliesTo:{labor:true,parts:true,fees:true},taxExempt:false});
     notify('Customer added!');
   };
 
@@ -1400,7 +1429,7 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
     const phones = editCust.phones.filter(p => p.trim());
     const emails = editCust.emails.filter(e => e.trim());
     const discount = editCust.discount !== '' && editCust.discount != null ? parseFloat(editCust.discount) : undefined;
-    onUpdateCustomer({...editCust, phones, emails, phone: phones[0] || '', email: emails[0] || '', discount, taxExempt: editCust.taxExempt || false});
+    onUpdateCustomer({...editCust, phones, emails, phone: phones[0] || '', email: emails[0] || '', discount, discountAppliesTo: editCust.discountAppliesTo || {labor:true,parts:true,fees:true}, taxExempt: editCust.taxExempt || false});
     setShowEditCust(false);
     setEditCust(null);
     notify('Customer updated!');
@@ -1422,7 +1451,7 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
           <div className="kf-info-details">
             <div className="kf-info-name">
               {getName(customer)}
-              {customer.discount > 0 && <span className="kf-badge sm green" style={{marginLeft:6}}>-${parseFloat(customer.discount).toFixed(2)} off</span>}
+              {customer.discount > 0 && <span className="kf-badge sm green" style={{marginLeft:6}}>{customer.discount}% off</span>}
               {customer.taxExempt && <span className="kf-badge sm" style={{marginLeft:4,background:'rgba(45,147,108,0.2)',color:'#2d936c'}}>Tax Exempt</span>}
             </div>
             <div className="kf-info-row">
@@ -1504,8 +1533,8 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
               </div>
               <div className="kf-row">
                 <div className="kf-form-group">
-                  <label>Discount ($)</label>
-                  <input type="number" min="0" step="0.01" placeholder="e.g. 25.00" value={newCust.discount} onChange={e => setNewCust({...newCust, discount: e.target.value})}/>
+                  <label>Discount (%)</label>
+                  <input type="number" min="0" max="100" step="0.5" placeholder="e.g. 25" value={newCust.discount} onChange={e => setNewCust({...newCust, discount: e.target.value})}/>
                 </div>
                 <div className="kf-form-group kf-toggle-group">
                   <label>Tax Exempt</label>
@@ -1515,6 +1544,19 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
                   </div>
                 </div>
               </div>
+              {newCust.discount > 0 && (
+                <div className="kf-form-group">
+                  <label>Apply Discount To</label>
+                  <div className="kf-discount-toggles">
+                    {[['labor','Labor'],['parts','Parts'],['fees','Fees']].map(([key, label]) => (
+                      <div key={key} className={`kf-disc-toggle ${newCust.discountAppliesTo[key] ? 'on' : ''}`}
+                        onClick={() => setNewCust({...newCust, discountAppliesTo: {...newCust.discountAppliesTo, [key]: !newCust.discountAppliesTo[key]}})}>
+                        {label}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="kf-modal-footer"><button className="kf-btn secondary" onClick={() => setShowAddCust(false)}>Cancel</button><button className="kf-btn primary" onClick={handleSaveCustomer}><Save size={16}/>Save</button></div>
             </div>
           </div>
@@ -1555,8 +1597,8 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
               </div>
               <div className="kf-row">
                 <div className="kf-form-group">
-                  <label>Discount ($)</label>
-                  <input type="number" min="0" step="0.01" placeholder="e.g. 25.00" value={editCust.discount ?? ''} onChange={e => setEditCust({...editCust, discount: e.target.value})}/>
+                  <label>Discount (%)</label>
+                  <input type="number" min="0" max="100" step="0.5" placeholder="e.g. 25" value={editCust.discount ?? ''} onChange={e => setEditCust({...editCust, discount: e.target.value})}/>
                 </div>
                 <div className="kf-form-group kf-toggle-group">
                   <label>Tax Exempt</label>
@@ -1566,6 +1608,22 @@ function CustomerVehicleSelector({customers, vehicles, selectedCustomerId, selec
                   </div>
                 </div>
               </div>
+              {(editCust.discount ?? 0) > 0 && (
+                <div className="kf-form-group">
+                  <label>Apply Discount To</label>
+                  <div className="kf-discount-toggles">
+                    {[['labor','Labor'],['parts','Parts'],['fees','Fees']].map(([key, label]) => {
+                      const applies = editCust.discountAppliesTo || {labor:true,parts:true,fees:true};
+                      return (
+                        <div key={key} className={`kf-disc-toggle ${applies[key] ? 'on' : ''}`}
+                          onClick={() => setEditCust({...editCust, discountAppliesTo: {...applies, [key]: !applies[key]}})}>
+                          {label}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="kf-modal-footer"><button className="kf-btn secondary" onClick={() => setShowEditCust(false)}>Cancel</button><button className="kf-btn primary" onClick={handleUpdateCustomer}><Save size={16}/>Save Changes</button></div>
             </div>
           </div>
@@ -1752,7 +1810,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
   const computeFinals = useCallback((d) => {
     const sub = (d.items || []).reduce((s, item) => s + calcItemTotal(item, settings.laborRate), 0);
     const customer = customers.find(c => c.id === d.customerId);
-    const disc = customer?.discount ? parseFloat(customer.discount) : 0;
+    const disc = calcDiscountAmount(d.items || [], settings.laborRate, customer);
     const taxable = Math.max(0, sub - disc);
     const tx = customer?.taxExempt ? 0 : taxable * settings.taxRate / 100;
     const tot = taxable + tx;
@@ -1796,7 +1854,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
   const displayTitle = doc.title || (doc.items?.[0]?.description) || (isInvoice ? 'Untitled Invoice' : 'Untitled Estimate');
 
   const subtotal = (doc.items || []).reduce((s, item) => s + calcItemTotal(item, settings.laborRate), 0);
-  const disc = customer?.discount ? parseFloat(customer.discount) : 0;
+  const disc = calcDiscountAmount(doc.items || [], settings.laborRate, customer);
   const taxable = Math.max(0, subtotal - disc);
   const tax = customer?.taxExempt ? 0 : taxable * settings.taxRate / 100;
   const total = taxable + tax;
@@ -1994,7 +2052,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
 
         <div class="totals">
           <div class="total-row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
-          ${disc > 0 ? `<div class="total-row"><span>Discount</span><span>-$${disc.toFixed(2)}</span></div>` : ''}
+          ${disc > 0 ? `<div class="total-row"><span>Discount (${customer?.discount}%)</span><span>-$${disc.toFixed(2)}</span></div>` : ''}
           ${customer?.taxExempt ? `<div class="total-row" style="color:#2d936c"><span>Tax</span><span>Exempt</span></div>` : `<div class="total-row"><span>Tax (${settings.taxRate}%)</span><span>$${tax.toFixed(2)}</span></div>`}
           <div class="total-row final"><span>Total</span><span>$${total.toFixed(2)}</span></div>
         </div>
@@ -2188,7 +2246,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
           <div className="kf-est-summary">
             <h3>Summary</h3>
             <div className="kf-summary-row"><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
-            {disc > 0 && <div className="kf-summary-row green"><span>Discount</span><span>-${disc.toFixed(2)}</span></div>}
+            {disc > 0 && <div className="kf-summary-row green"><span>Discount ({customer?.discount}%)</span><span>-${disc.toFixed(2)}</span></div>}
             {customer?.taxExempt
               ? <div className="kf-summary-row green"><span>Tax</span><span>Exempt</span></div>
               : <div className="kf-summary-row"><span>Tax ({settings.taxRate}%)</span><span>${tax.toFixed(2)}</span></div>
