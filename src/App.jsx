@@ -25,19 +25,12 @@ const DEFAULT_SETTINGS = {
 };
 
 const DEFAULT_DATA = {
-  customers: [
-    { id: 'c1', type: 'public', firstName: 'John', lastName: 'Martinez', email: 'john@email.com', phone: '(425) 555-0123', createdAt: '2024-01-15', totalSpent: 2450 },
-    { id: 'c2', type: 'fleet', companyName: 'Northwest Auto Group', contactName: 'Sarah Chen', email: 'sarah@nwauto.com', phone: '(425) 555-0456', createdAt: '2023-11-20', totalSpent: 18750, fleetDiscount: 15 },
-  ],
-  vehicles: [
-    { id: 'v1', customerId: 'c1', year: '2022', make: 'Toyota', model: 'Camry', vin: '4T1BF1FK5CU123456', plate: 'ABC1234', plateState: 'WA' },
-    { id: 'v2', customerId: 'c2', year: '2023', make: 'Ford', model: 'F-150', vin: '1FTFW1E57MFA12345', plate: 'FLT001', plateState: 'WA' },
-  ],
+  customers: [],
+  vehicles: [],
   estimates: [],
   invoices: [],
   users: [
     { id: 'u1', name: 'Admin', email: 'admin@kaizen.com', pin: '1234', role: 'admin' },
-    { id: 'u2', name: 'Mike Johnson', email: 'mike@kaizen.com', pin: '5678', role: 'tech' },
   ]
 };
 
@@ -91,8 +84,59 @@ async function decodeVIN(vin) {
   } catch (e) { return { success: false, error: e.message }; }
 }
 
-function loadData(key, def) { try { const s = localStorage.getItem(`kf_${key}`); return s ? JSON.parse(s) : def; } catch { return def; } }
-function saveData(key, data) { try { localStorage.setItem(`kf_${key}`, JSON.stringify(data)); } catch {} }
+// API URL - empty for same-origin (production), or set for development
+const API_URL = '';
+
+// Load data from API with localStorage fallback
+function loadData(key, def) { 
+  try { 
+    const s = localStorage.getItem(`kf_${key}`); 
+    return s ? JSON.parse(s) : def; 
+  } catch { return def; } 
+}
+
+// Save data to both API and localStorage
+async function saveDataToAPI(key, data) {
+  try {
+    // Save to localStorage immediately for responsiveness
+    localStorage.setItem(`kf_${key}`, JSON.stringify(data));
+    
+    // Also save to API for persistence
+    await fetch(`${API_URL}/api/data/${key}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: data })
+    });
+  } catch (e) {
+    console.log('API save failed, data saved to localStorage:', e);
+  }
+}
+
+function saveData(key, data) { 
+  try { 
+    localStorage.setItem(`kf_${key}`, JSON.stringify(data));
+    // Fire and forget API save
+    saveDataToAPI(key, data);
+  } catch {} 
+}
+
+// Load all data from API on startup
+async function loadAllFromAPI() {
+  try {
+    const res = await fetch(`${API_URL}/api/data`);
+    if (res.ok) {
+      const data = await res.json();
+      // Update localStorage with server data
+      for (const [key, value] of Object.entries(data)) {
+        localStorage.setItem(`kf_${key}`, JSON.stringify(value));
+      }
+      return data;
+    }
+  } catch (e) {
+    console.log('API load failed, using localStorage:', e);
+  }
+  return null;
+}
 
 function calcItemTotal(item, laborRate) {
   if (item.type === 'labor') return (item.hours || 0) * (item.rate || laborRate);
@@ -102,6 +146,7 @@ function calcItemTotal(item, laborRate) {
 }
 
 export default function App() {
+  const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(() => loadData('currentUser', null));
   const [view, setView] = useState('dashboard');
   const [customers, setCustomers] = useState(() => loadData('customers', DEFAULT_DATA.customers));
@@ -117,14 +162,30 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [editingEstimate, setEditingEstimate] = useState(null);
 
-  useEffect(() => { saveData('customers', customers); }, [customers]);
-  useEffect(() => { saveData('vehicles', vehicles); }, [vehicles]);
-  useEffect(() => { saveData('estimates', estimates); }, [estimates]);
-  useEffect(() => { saveData('invoices', invoices); }, [invoices]);
-  useEffect(() => { saveData('users', users); }, [users]);
-  useEffect(() => { saveData('settings', settings); }, [settings]);
+  // Load data from API on startup
+  useEffect(() => {
+    loadAllFromAPI().then(data => {
+      if (data) {
+        if (data.customers) setCustomers(data.customers);
+        if (data.vehicles) setVehicles(data.vehicles);
+        if (data.estimates) setEstimates(data.estimates);
+        if (data.invoices) setInvoices(data.invoices);
+        if (data.users) setUsers(data.users);
+        if (data.settings) setSettings(data.settings);
+        if (data.cannedItems) setCannedItems(data.cannedItems);
+      }
+      setIsLoading(false);
+    });
+  }, []);
+
+  useEffect(() => { if (!isLoading) saveData('customers', customers); }, [customers, isLoading]);
+  useEffect(() => { if (!isLoading) saveData('vehicles', vehicles); }, [vehicles, isLoading]);
+  useEffect(() => { if (!isLoading) saveData('estimates', estimates); }, [estimates, isLoading]);
+  useEffect(() => { if (!isLoading) saveData('invoices', invoices); }, [invoices, isLoading]);
+  useEffect(() => { if (!isLoading) saveData('users', users); }, [users, isLoading]);
+  useEffect(() => { if (!isLoading) saveData('settings', settings); }, [settings, isLoading]);
   useEffect(() => { saveData('currentUser', currentUser); }, [currentUser]);
-  useEffect(() => { saveData('cannedItems', cannedItems); }, [cannedItems]);
+  useEffect(() => { if (!isLoading) saveData('cannedItems', cannedItems); }, [cannedItems, isLoading]);
 
   const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(() => setToast(null), 3000); };
   const getName = c => c ? (c.type === 'fleet' ? c.companyName : `${c.firstName} ${c.lastName}`) : '';

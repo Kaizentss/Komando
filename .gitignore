@@ -6,6 +6,7 @@ node_modules/
 # Build output
 dist/
 build/
+static/
 
 # Environment files
 .env
@@ -46,3 +47,19 @@ desktop.ini
 
 # Vite
 *.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+.venv/
+*.egg-info/
+.eggs/
+
+# Database
+*.db
+data/

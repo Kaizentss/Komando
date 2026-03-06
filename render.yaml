@@ -1,0 +1,20 @@
+# render.yaml - Render Blueprint for Komando
+services:
+  - type: web
+    name: komando
+    runtime: python
+    buildCommand: |
+      pip install -r requirements.txt
+      npm install
+      npm run build
+      cp -r dist static
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    disk:
+      name: komando-data
+      mountPath: /data
+      sizeGB: 1
