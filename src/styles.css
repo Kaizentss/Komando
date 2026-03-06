@@ -1308,3 +1308,32 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
   font-size: 0.68rem;
   padding: 2px 6px;
 }
+
+/* ===== Discount Type Toggles ===== */
+.kf-discount-toggles {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.kf-disc-toggle {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s;
+}
+.kf-disc-toggle:hover {
+  border-color: rgba(230,57,70,0.4);
+  color: var(--text);
+}
+.kf-disc-toggle.on {
+  background: rgba(230,57,70,0.15);
+  border-color: rgba(230,57,70,0.5);
+  color: var(--primary);
+  font-weight: 600;
+}
