@@ -171,6 +171,30 @@ function SuperAdminConsole({ onExit }) {
     notify('Company deleted'); fetchCompanies();
   };
 
+  const [editingMaster, setEditingMaster] = useState(null); // {cid, userId, name, email, password:''}
+
+  const openEditMaster = async (c) => {
+    try {
+      const res = await fetch(`${API_URL}/api/superadmin/companies/${c.id}/data`);
+      if (res.ok) {
+        const data = await res.json();
+        const master = (data.users || []).find(u => u.role === 'master_admin');
+        if (master) setEditingMaster({ cid: c.id, userId: master.id, name: master.name, email: master.email || '', password: '' });
+        else notify('Master admin not found', 'error');
+      }
+    } catch { notify('Failed to load', 'error'); }
+  };
+
+  const saveMaster = async () => {
+    if (!editingMaster.email) { notify('Email required', 'error'); return; }
+    const res = await fetch(`${API_URL}/api/superadmin/companies/${editingMaster.cid}/users/${editingMaster.userId}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ userId: editingMaster.userId, email: editingMaster.email, password: editingMaster.password || undefined, name: editingMaster.name })
+    });
+    if (res.ok) { notify('Master admin updated'); setEditingMaster(null); }
+    else notify('Update failed', 'error');
+  };
+
   const addAccount = async () => {
     if (!newAccount.username || !newAccount.password) { notify('Username and password required','error'); return; }
     const res = await fetch(`${API_URL}/api/superadmin/accounts`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(newAccount) });
@@ -260,6 +284,7 @@ function SuperAdminConsole({ onExit }) {
                         <div className="kf-sub">ID: <code>{c.id}</code> · Master: {c.masterAdmin} · Created: {c.createdAt?.split('T')[0]}</div>
                       </div>
                       <div className="kf-sa-co-actions">
+                        <button className="kf-btn secondary sm" onClick={()=>openEditMaster(c)} title="Edit master admin"><Edit2 size={14}/>Master Admin</button>
                         <button className="kf-btn secondary sm" onClick={()=>backupCompany(c.id)}><Download size={14}/>Backup</button>
                         <button className={`kf-btn sm ${c.suspended?'success':'secondary'}`} onClick={()=>toggleSuspend(c)}><PowerOff size={14}/>{c.suspended?'Unsuspend':'Suspend'}</button>
                         <button className="kf-btn danger sm" onClick={()=>deleteCompany(c)}><Trash2 size={14}/>Delete</button>
@@ -272,8 +297,21 @@ function SuperAdminConsole({ onExit }) {
           </>
         )}
 
-        {tab === 'accounts' && (
-          <div className="kf-sa-card">
+        {editingMaster && (
+          <div className="kf-overlay" onClick={()=>setEditingMaster(null)}>
+            <div className="kf-modal" onClick={e=>e.stopPropagation()}>
+              <div className="kf-modal-header"><h2><UserCog size={18}/> Edit Master Admin</h2><button className="kf-close" onClick={()=>setEditingMaster(null)}><X size={20}/></button></div>
+              <div className="kf-modal-body">
+                <div className="kf-form-group"><label>Name</label><input value={editingMaster.name} onChange={e=>setEditingMaster({...editingMaster,name:e.target.value})}/></div>
+                <div className="kf-form-group"><label>Email *</label><input type="email" value={editingMaster.email} onChange={e=>setEditingMaster({...editingMaster,email:e.target.value})}/></div>
+                <div className="kf-form-group"><label>New Password <span className="kf-sub">(leave blank to keep current)</span></label><input type="password" value={editingMaster.password} onChange={e=>setEditingMaster({...editingMaster,password:e.target.value})} placeholder="••••••••"/></div>
+              </div>
+              <div className="kf-modal-footer"><button className="kf-btn secondary" onClick={()=>setEditingMaster(null)}>Cancel</button><button className="kf-btn primary" onClick={saveMaster}><Save size={16}/>Save</button></div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'accounts' && (          <div className="kf-sa-card">
             <div className="kf-section-header">
               <h3><Shield size={18}/>Super Admin Accounts</h3>
               <button className="kf-btn primary sm" onClick={()=>setShowAddAccount(true)}><Plus size={14}/>Add Account</button>
