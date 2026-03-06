@@ -6,9 +6,11 @@ import {
   Edit2, UserCog, Clock, Package, Tag, Upload, Image, File, Video,
   StickyNote, Eye, EyeOff, Camera, LogOut, Lock, User, ArrowLeft,
   Clipboard, ChevronDown, CircleDot, Printer, Layers, FolderPlus, ChevronUp,
-  MapPin, Shield, SlidersHorizontal
+  MapPin, Shield, SlidersHorizontal, Globe, Database, Download, RefreshCw,
+  PowerOff, Key, AlertTriangle
 } from 'lucide-react';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
 const ITEM_TYPES = [
   { id: 'labor', name: 'Labor', icon: Clock },
   { id: 'part', name: 'Part', icon: Package },
@@ -17,44 +19,14 @@ const ITEM_TYPES = [
 
 const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
 
-const DEFAULT_SETTINGS = {
-  laborRate: 220.50,
-  taxRate: 9,
-  shopName: 'Kaizen Automotive',
-  phone: '(360) 555-1234',
-  email: 'service@kaizenautomotive.com'
-};
+const DEFAULT_SETTINGS = { laborRate: 125.00, taxRate: 9, shopName: '', phone: '', email: '' };
 
-const DEFAULT_LOCATIONS = [
-  { id: 'loc1', name: 'Main Location', address: '', phone: '', email: '', laborRate: null, taxRate: null }
-];
-
-const DEFAULT_DATA = {
-  customers: [],
-  vehicles: [],
-  estimates: [],
-  invoices: [],
-  locations: DEFAULT_LOCATIONS,
-  users: [
-    { id: 'u1', name: 'Admin', email: 'admin@kaizen.com', pin: '1234', role: 'admin', locationId: 'loc1' },
-  ]
-};
-
-// Role hierarchy: admin > manager > tech
 const ROLES = [
-  { id: 'admin',   label: 'Admin',   desc: 'Full access, manages locations & all users' },
-  { id: 'manager', label: 'Manager', desc: 'Manages docs & users at their location' },
-  { id: 'tech',    label: 'Tech',    desc: 'Create and edit work orders' },
+  { id: 'master_admin', label: 'Master Admin', desc: 'Full company control' },
+  { id: 'admin',        label: 'Admin',        desc: 'Manage users & docs at their location' },
+  { id: 'technician',   label: 'Technician',   desc: 'Create and edit work orders' },
 ];
 
-// Can a user manage another user?
-function canManageUser(actor, target) {
-  if (actor.role === 'admin') return true;
-  if (actor.role === 'manager' && target.role === 'tech' && target.locationId === actor.locationId) return true;
-  return false;
-}
-
-// Resolve effective settings for a location (location overrides fallback to global)
 function resolveSettings(globalSettings, location) {
   if (!location) return globalSettings;
   return {
@@ -67,108 +39,10 @@ function resolveSettings(globalSettings, location) {
   };
 }
 
-async function decodeVIN(vin) {
-  try {
-    const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/${vin}?format=json`);
-    const data = await res.json();
-    if (data.Results?.[0]) {
-      const r = data.Results[0];
-      if (!r.Make && !r.Model) return { success: false, error: 'Invalid VIN' };
-      
-      // Build engine string
-      let engineStr = '';
-      if (r.DisplacementL) {
-        engineStr = `${r.DisplacementL}L`;
-        if (r.EngineCylinders) engineStr += ` ${r.EngineCylinders}-Cyl`;
-      }
-      
-      // Determine transmission type
-      let transType = r.TransmissionStyle || '';
-      if (!transType && r.TransmissionSpeeds) {
-        transType = `${r.TransmissionSpeeds}-Speed`;
-      }
-      // Check for auto/manual
-      const transLower = (transType + ' ' + (r.DriveType || '')).toLowerCase();
-      if (transLower.includes('automatic') || transLower.includes('auto') || transLower.includes('cvt') || transLower.includes('dct')) {
-        transType = transType ? `${transType} (Automatic)` : 'Automatic';
-      } else if (transLower.includes('manual') || transLower.includes('mt')) {
-        transType = transType ? `${transType} (Manual)` : 'Manual';
-      }
-      
-      return { 
-        success: true, 
-        vin, 
-        year: r.ModelYear || '', 
-        make: r.Make || '', 
-        model: r.Model || '', 
-        trim: r.Trim || '',
-        engineLiters: r.DisplacementL || '',
-        engineCylinders: r.EngineCylinders || '',
-        engineModel: r.EngineModel || '',  // Engine code
-        engine: engineStr,
-        transmission: transType,
-        transmissionSpeeds: r.TransmissionSpeeds || '',
-        bodyType: r.BodyClass || '', 
-        driveType: r.DriveType || '',
-        fuelType: r.FuelTypePrimary || ''
-      };
-    }
-    return { success: false, error: 'No results' };
-  } catch (e) { return { success: false, error: e.message }; }
-}
-
-// API URL - empty for same-origin (production), or set for development
-const API_URL = '';
-
-// Load data from API with localStorage fallback
-function loadData(key, def) { 
-  try { 
-    const s = localStorage.getItem(`kf_${key}`); 
-    return s ? JSON.parse(s) : def; 
-  } catch { return def; } 
-}
-
-// Save data to both API and localStorage
-async function saveDataToAPI(key, data) {
-  try {
-    // Save to localStorage immediately for responsiveness
-    localStorage.setItem(`kf_${key}`, JSON.stringify(data));
-    
-    // Also save to API for persistence
-    await fetch(`${API_URL}/api/data/${key}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value: data })
-    });
-  } catch (e) {
-    console.log('API save failed, data saved to localStorage:', e);
-  }
-}
-
-function saveData(key, data) { 
-  try { 
-    localStorage.setItem(`kf_${key}`, JSON.stringify(data));
-    // Fire and forget API save
-    saveDataToAPI(key, data);
-  } catch {} 
-}
-
-// Load all data from API on startup
-async function loadAllFromAPI() {
-  try {
-    const res = await fetch(`${API_URL}/api/data`);
-    if (res.ok) {
-      const data = await res.json();
-      // Update localStorage with server data
-      for (const [key, value] of Object.entries(data)) {
-        localStorage.setItem(`kf_${key}`, JSON.stringify(value));
-      }
-      return data;
-    }
-  } catch (e) {
-    console.log('API load failed, using localStorage:', e);
-  }
-  return null;
+function canManageUser(actor, target) {
+  if (actor.role === 'master_admin') return true;
+  if (actor.role === 'admin' && target.role === 'technician' && target.locationId === actor.locationId) return true;
+  return false;
 }
 
 function calcItemTotal(item, laborRate) {
@@ -178,291 +52,298 @@ function calcItemTotal(item, laborRate) {
   return 0;
 }
 
-export default function App() {
-  const [isLoading, setIsLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState(() => loadData('currentUser', null));
-  const [view, setView] = useState('dashboard');
-  const [customers, setCustomers] = useState(() => loadData('customers', DEFAULT_DATA.customers));
-  const [vehicles, setVehicles] = useState(() => loadData('vehicles', DEFAULT_DATA.vehicles));
-  const [estimates, setEstimates] = useState(() => loadData('estimates', DEFAULT_DATA.estimates));
-  const [invoices, setInvoices] = useState(() => loadData('invoices', DEFAULT_DATA.invoices));
-  const [users, setUsers] = useState(() => loadData('users', DEFAULT_DATA.users));
-  const [locations, setLocations] = useState(() => loadData('locations', DEFAULT_DATA.locations));
-  const [settings, setSettings] = useState(() => loadData('settings', DEFAULT_SETTINGS));
-  const [cannedItems, setCannedItems] = useState(() => loadData('cannedItems', { categories: [], items: [] }));
-  const [selected, setSelected] = useState(null);
-  const [modal, setModal] = useState(null);
-  const [search, setSearch] = useState('');
-  const [toast, setToast] = useState(null);
-  const [editingEstimate, setEditingEstimate] = useState(null);
-  // Location filter: null = all locations (admin/manager can see all), or a locationId
-  const [locationFilter, setLocationFilter] = useState(null);
-
-  // Load data from API on startup
-  useEffect(() => {
-    loadAllFromAPI().then(data => {
-      if (data) {
-        if (data.customers) setCustomers(data.customers);
-        if (data.vehicles) setVehicles(data.vehicles);
-        if (data.estimates) setEstimates(data.estimates);
-        if (data.invoices) setInvoices(data.invoices);
-        if (data.users) setUsers(data.users);
-        if (data.locations) setLocations(data.locations);
-        if (data.settings) setSettings(data.settings);
-        if (data.cannedItems) setCannedItems(data.cannedItems);
-      }
-      setIsLoading(false);
-    });
-  }, []);
-
-  useEffect(() => { if (!isLoading) saveData('customers', customers); }, [customers, isLoading]);
-  useEffect(() => { if (!isLoading) saveData('vehicles', vehicles); }, [vehicles, isLoading]);
-  useEffect(() => { if (!isLoading) saveData('estimates', estimates); }, [estimates, isLoading]);
-  useEffect(() => { if (!isLoading) saveData('invoices', invoices); }, [invoices, isLoading]);
-  useEffect(() => { if (!isLoading) saveData('users', users); }, [users, isLoading]);
-  useEffect(() => { if (!isLoading) saveData('locations', locations); }, [locations, isLoading]);
-  useEffect(() => { if (!isLoading) saveData('settings', settings); }, [settings, isLoading]);
-  useEffect(() => { saveData('currentUser', currentUser); }, [currentUser]);
-  useEffect(() => { if (!isLoading) saveData('cannedItems', cannedItems); }, [cannedItems, isLoading]);
-
-  const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(() => setToast(null), 3000); };
-  const getName = c => c ? (c.type === 'fleet' ? c.companyName : `${c.firstName} ${c.lastName}`) : '';
-  const closeModal = () => { setModal(null); setSelected(null); };
-  const sorted = [...customers].sort((a,b) => getName(a).localeCompare(getName(b)));
-
-  // Helpers
-  const getLocation = (id) => locations.find(l => l.id === id) || null;
-  const getEffectiveSettings = (locationId) => resolveSettings(settings, getLocation(locationId));
-  const activeLocationId = locationFilter; // null = all
-
-  // Filter docs by active location
-  const filteredEstimates = activeLocationId ? estimates.filter(e => e.locationId === activeLocationId) : estimates;
-  const filteredInvoices  = activeLocationId ? invoices.filter(i => i.locationId === activeLocationId)  : invoices;
-
-  const stats = {
-    customers: customers.length,
-    pending: filteredEstimates.filter(e => e.status === 'pending').length,
-    unpaid: filteredInvoices.filter(i => i.status !== 'paid').length,
-    revenue: filteredInvoices.filter(i => i.status === 'paid').reduce((s,i) => s + (i.finalTotal||i.total), 0)
-  };
-
-  const handleLogin = (user) => {
-    setCurrentUser(user);
-    // Techs default to filtered to their own location; admin/manager see all by default
-    setLocationFilter(user.role === 'tech' ? (user.locationId || null) : null);
-    notify(`Welcome, ${user.name}!`);
-  };
-  const handleLogout = () => { setCurrentUser(null); setView('dashboard'); setEditingEstimate(null); setLocationFilter(null); };
-
-  // Create new BLANK estimate and open it
-  // Get the next document number (finds highest existing number + 1)
-  const getNextDocNumber = () => {
-    const allNumbers = [
-      ...estimates.map(e => parseInt(e.number?.replace('EST-', '') || '0')),
-      ...invoices.map(i => parseInt(i.number?.replace('INV-', '') || '0'))
-    ];
-    const maxNum = Math.max(0, ...allNumbers);
-    return maxNum + 1;
-  };
-
-  const handleNewEstimate = () => {
-    const docNum = getNextDocNumber();
-    const newEst = {
-      id: `e${Date.now()}`,
-      docNumber: docNum,  // Store raw number for pairing
-      number: `EST-${String(docNum).padStart(4, '0')}`,
-      locationId: currentUser?.locationId || locations[0]?.id || null,
-      customerId: null,
-      vehicleId: null,
-      title: '',
-      customerComments: '',
-      recommendations: '',
-      items: [],
-      inspections: [],
-      internalNotes: [],
-      createdAt: new Date().toISOString().split('T')[0],
-      createdBy: currentUser?.id,
-      status: 'pending'
-    };
-    setEstimates([...estimates, newEst]);
-    setEditingEstimate(newEst);
-  };
-
-  const handleEstimateSave = (doc) => {
-    setEstimates(estimates.map(e => e.id === doc.id ? doc : e));
-    notify('Estimate saved');
-  };
-
-  const handleAddCustomer = (cust) => {
-    const newCust = {...cust, id: `c${Date.now()}`, createdAt: new Date().toISOString().split('T')[0], totalSpent: 0};
-    setCustomers([...customers, newCust]);
-    return newCust;
-  };
-
-  const handleAddVehicle = (veh) => {
-    const newVeh = {...veh, id: `v${Date.now()}`};
-    setVehicles([...vehicles, newVeh]);
-    return newVeh;
-  };
-
-  const handleUpdateCustomer = (cust) => {
-    setCustomers(customers.map(c => c.id === cust.id ? cust : c));
-  };
-
-  const handleConvertToInvoice = (doc) => {
-    // Use same document number as estimate
-    const docNum = doc.docNumber || parseInt(doc.number?.replace('EST-', '') || '0');
-    
-    // Create the invoice from the estimate data
-    const inv = {
-      ...doc,
-      id: doc.id, // Keep same ID for simplicity
-      docNumber: docNum,
-      number: `INV-${String(docNum).padStart(4, '0')}`,
-      docType: 'invoice',
-      status: 'unpaid',
-      convertedAt: new Date().toISOString().split('T')[0],
-      dueAt: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-      payments: [],
-      balance: doc.finalTotal || doc.total || 0
-    };
-    
-    // Remove the estimate
-    setEstimates(estimates.filter(e => e.id !== doc.id));
-    // Add the invoice
-    setInvoices([...invoices, inv]);
-    // Switch to editing the invoice
-    setEditingEstimate(inv);
-    notify(`Converted to ${inv.number}!`);
-  };
-
-  const handleRevertToEstimate = (inv) => {
-    // Convert invoice back to estimate
-    const docNum = inv.docNumber || parseInt(inv.number?.replace('INV-', '') || '0');
-    
-    const est = {
-      ...inv,
-      id: inv.id,
-      docNumber: docNum,
-      number: `EST-${String(docNum).padStart(4, '0')}`,
-      docType: 'estimate',
-      status: 'approved',
-      // Remove invoice-specific fields
-      payments: undefined,
-      balance: undefined,
-      dueAt: undefined,
-      convertedAt: undefined
-    };
-    
-    // Remove the invoice
-    setInvoices(invoices.filter(i => i.id !== inv.id));
-    // Add back as estimate
-    setEstimates([...estimates, est]);
-    // Switch to editing the estimate
-    setEditingEstimate(est);
-    notify(`Reverted to ${est.number}!`);
-  };
-
-  // Save handler that works for both estimates and invoices
-  const handleDocumentSave = (doc) => {
-    if (doc.docType === 'invoice') {
-      setInvoices(invoices.map(i => i.id === doc.id ? doc : i));
-    } else {
-      setEstimates(estimates.map(e => e.id === doc.id ? doc : e));
+// ─── VIN Decoder ──────────────────────────────────────────────────────────────
+async function decodeVIN(vin) {
+  try {
+    const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/${vin}?format=json`);
+    const data = await res.json();
+    if (data.Results?.[0]) {
+      const r = data.Results[0];
+      if (!r.Make && !r.Model) return { success: false, error: 'Invalid VIN' };
+      let engineStr = '';
+      if (r.DisplacementL) { engineStr = `${r.DisplacementL}L`; if (r.EngineCylinders) engineStr += ` ${r.EngineCylinders}-Cyl`; }
+      let transType = r.TransmissionStyle || '';
+      if (!transType && r.TransmissionSpeeds) transType = `${r.TransmissionSpeeds}-Speed`;
+      const transLower = (transType + ' ' + (r.DriveType || '')).toLowerCase();
+      if (transLower.includes('automatic') || transLower.includes('auto') || transLower.includes('cvt') || transLower.includes('dct'))
+        transType = transType ? `${transType} (Automatic)` : 'Automatic';
+      else if (transLower.includes('manual') || transLower.includes('mt'))
+        transType = transType ? `${transType} (Manual)` : 'Manual';
+      return { success: true, vin, year: r.ModelYear||'', make: r.Make||'', model: r.Model||'', trim: r.Trim||'',
+        engineLiters: r.DisplacementL||'', engineCylinders: r.EngineCylinders||'', engineModel: r.EngineModel||'',
+        engine: engineStr, transmission: transType, transmissionSpeeds: r.TransmissionSpeeds||'',
+        bodyType: r.BodyClass||'', driveType: r.DriveType||'', fuelType: r.FuelTypePrimary||'' };
     }
-    notify('Saved');
+    return { success: false, error: 'No results' };
+  } catch (e) { return { success: false, error: e.message }; }
+}
+
+// ─── API Layer ────────────────────────────────────────────────────────────────
+const API_URL = '';
+
+// Company-scoped storage key prefix
+function lsKey(companyId, key) { return `kf_${companyId}_${key}`; }
+
+function loadData(companyId, key, def) {
+  try { const s = localStorage.getItem(lsKey(companyId, key)); return s ? JSON.parse(s) : def; } catch { return def; }
+}
+
+async function saveDataToAPI(companyId, key, data) {
+  try {
+    localStorage.setItem(lsKey(companyId, key), JSON.stringify(data));
+    await fetch(`${API_URL}/api/company/${companyId}/data/${key}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: data })
+    });
+  } catch (e) { console.log('API save failed:', e); }
+}
+
+function saveData(companyId, key, data) {
+  try {
+    localStorage.setItem(lsKey(companyId, key), JSON.stringify(data));
+    saveDataToAPI(companyId, key, data);
+  } catch {}
+}
+
+async function loadAllFromAPI(companyId) {
+  try {
+    const res = await fetch(`${API_URL}/api/company/${companyId}/data`);
+    if (res.ok) {
+      const data = await res.json();
+      for (const [key, value] of Object.entries(data))
+        localStorage.setItem(lsKey(companyId, key), JSON.stringify(value));
+      return data;
+    }
+  } catch (e) { console.log('API load failed, using localStorage:', e); }
+  return null;
+}
+
+// ─── Super Admin Console ──────────────────────────────────────────────────────
+function SuperAdminConsole({ onExit }) {
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [viewingCompany, setViewingCompany] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [form, setForm] = useState({ companyName:'', companyId:'', masterAdminName:'', masterAdminPin:'', masterAdminEmail:'' });
+  const [restoring, setRestoring] = useState(false);
+  const restoreRef = useRef();
+
+  const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
+
+  useEffect(() => { fetchCompanies(); }, []);
+
+  const fetchCompanies = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/superadmin/companies`);
+      if (res.ok) setCompanies(await res.json());
+    } catch {}
+    setLoading(false);
   };
 
-  if (!currentUser) return <LoginScreen users={users} onLogin={handleLogin} />;
+  const createCompany = async () => {
+    if (!form.companyName || !form.companyId || !form.masterAdminName || !form.masterAdminPin) {
+      notify('All fields required', 'error'); return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/superadmin/companies`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(form)
+      });
+      if (res.ok) {
+        notify('Company created!');
+        setShowCreate(false);
+        setForm({ companyName:'', companyId:'', masterAdminName:'', masterAdminPin:'', masterAdminEmail:'' });
+        fetchCompanies();
+      } else {
+        const err = await res.json();
+        notify(err.detail || 'Failed to create', 'error');
+      }
+    } catch { notify('Network error', 'error'); }
+  };
 
-  if (editingEstimate) {
-    const docLocationId = editingEstimate.locationId || currentUser?.locationId || locations[0]?.id;
-    return (
-      <EstimatePage
-        document={editingEstimate}
-        customers={sorted}
-        vehicles={vehicles}
-        users={users}
-        locations={locations}
-        settings={getEffectiveSettings(docLocationId)}
-        cannedItems={cannedItems}
-        currentUser={currentUser}
-        getName={getName}
-        onSave={handleDocumentSave}
-        onAddCustomer={handleAddCustomer}
-        onAddVehicle={handleAddVehicle}
-        onUpdateCustomer={handleUpdateCustomer}
-        onConvert={handleConvertToInvoice}
-        onRevert={handleRevertToEstimate}
-        onClose={() => setEditingEstimate(null)}
-        notify={notify}
-      />
-    );
-  }
+  const toggleSuspend = async (c) => {
+    if (!confirm(`${c.suspended ? 'Unsuspend' : 'Suspend'} ${c.name}?`)) return;
+    await fetch(`${API_URL}/api/superadmin/companies/${c.id}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ suspended: !c.suspended })
+    });
+    notify(`Company ${c.suspended ? 'unsuspended' : 'suspended'}`);
+    fetchCompanies();
+  };
 
-  const navItems = [
-    {id:'dashboard',icon:Home,label:'Dashboard'}, {id:'customers',icon:Users,label:'Customers'},
-    {id:'vehicles',icon:Car,label:'Vehicles'}, {id:'estimates',icon:FileText,label:'Estimates'},
-    {id:'invoices',icon:DollarSign,label:'Invoices'}, {id:'canned',icon:Layers,label:'Canned Items'},
-    {id:'messages',icon:MessageSquare,label:'Messages'}, {id:'settings',icon:Settings,label:'Settings'},
-  ];
+  const deleteCompany = async (c) => {
+    if (!confirm(`PERMANENTLY DELETE ${c.name}? This cannot be undone.`)) return;
+    await fetch(`${API_URL}/api/superadmin/companies/${c.id}`, { method: 'DELETE' });
+    notify('Company deleted');
+    fetchCompanies();
+  };
+
+  const backupCompany = (cid) => { window.open(`${API_URL}/api/company/${cid}/backup`, '_blank'); };
+  const backupAll = () => { window.open(`${API_URL}/api/superadmin/backup`, '_blank'); };
+
+  const handleRestoreAll = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!confirm('This will overwrite all company data. Continue?')) return;
+    setRestoring(true);
+    const fd = new FormData(); fd.append('file', file);
+    try {
+      const res = await fetch(`${API_URL}/api/superadmin/restore`, { method: 'POST', body: fd });
+      if (res.ok) { notify('Full restore complete! Refresh to see changes.'); }
+      else notify('Restore failed', 'error');
+    } catch { notify('Network error', 'error'); }
+    setRestoring(false);
+    e.target.value = '';
+  };
 
   return (
-    <div className="kf-app">
+    <div className="kf-sa-console">
       {toast && <div className={`kf-toast ${toast.type}`}><CheckCircle size={16}/>{toast.msg}</div>}
-      <aside className="kf-sidebar">
-        <div className="kf-logo"><CircleDot size={26}/><span>Komando</span></div>
-        <button className="kf-new-btn" onClick={handleNewEstimate}><Zap size={20}/>New Estimate</button>
-        <nav className="kf-nav">
-          {navItems.map(n => <button key={n.id} className={`kf-nav-item ${view===n.id?'active':''}`} onClick={() => setView(n.id)}><n.icon size={20}/>{n.label}</button>)}
-        </nav>
-        <div className="kf-user-info">
-          <div className="kf-avatar">{currentUser.name.charAt(0)}</div>
-          <div className="kf-user-details">
-            <span className="kf-user-name">{currentUser.name}</span>
-            <span className="kf-user-role">{currentUser.role}{currentUser.locationId && getLocation(currentUser.locationId) ? ` · ${getLocation(currentUser.locationId).name}` : ''}</span>
-          </div>
-          <button className="kf-icon-btn" onClick={handleLogout} title="Logout"><LogOut size={18}/></button>
+      <div className="kf-sa-header">
+        <div className="kf-sa-brand"><Shield size={28}/><div><h1>Komando</h1><span>Super Admin Console</span></div></div>
+        <div className="kf-sa-header-actions">
+          <button className="kf-btn secondary sm" onClick={backupAll}><Download size={15}/>Backup All</button>
+          <label className="kf-btn secondary sm" style={{cursor:'pointer'}}>
+            {restoring ? <Loader2 size={15} className="spin"/> : <RefreshCw size={15}/>}Restore All
+            <input ref={restoreRef} type="file" accept=".zip" style={{display:'none'}} onChange={handleRestoreAll}/>
+          </label>
+          <button className="kf-btn primary sm" onClick={() => setShowCreate(true)}><Plus size={15}/>New Company</button>
+          <button className="kf-icon-btn" onClick={onExit} title="Exit"><LogOut size={18}/></button>
         </div>
-      </aside>
-      <main className="kf-main">
-        <header className="kf-header">
-          <h1>{navItems.find(n => n.id === view)?.label || 'Dashboard'}</h1>
-          <div className="kf-header-right">
-            {/* Location filter - only show when relevant views are active */}
-            {(view === 'estimates' || view === 'invoices' || view === 'dashboard') && locations.length > 1 && currentUser.role !== 'tech' && (
-              <div className="kf-loc-filter">
-                <MapPin size={15}/>
-                <select value={locationFilter || ''} onChange={e => setLocationFilter(e.target.value || null)}>
-                  <option value="">All Locations</option>
-                  {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
-              </div>
-            )}
-            <button className="kf-header-btn" onClick={handleNewEstimate}><Zap size={18}/>New Estimate</button>
-            <div className="kf-search"><Search size={18}/><input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}/></div>
+      </div>
+
+      <div className="kf-sa-body">
+        {showCreate && (
+          <div className="kf-sa-card kf-sa-create">
+            <div className="kf-section-header"><h3><Building2 size={18}/>Create New Company</h3><button className="kf-icon-btn" onClick={()=>setShowCreate(false)}><X size={18}/></button></div>
+            <div className="kf-row">
+              <div className="kf-form-group"><label>Company Name *</label><input value={form.companyName} onChange={e=>setForm({...form,companyName:e.target.value})} placeholder="Kaizen Automotive"/></div>
+              <div className="kf-form-group"><label>Company ID * <span className="kf-sub">(slug, no spaces)</span></label><input value={form.companyId} onChange={e=>setForm({...form,companyId:e.target.value.toLowerCase().replace(/\s/g,'-')})} placeholder="kaizen"/></div>
+            </div>
+            <div className="kf-row">
+              <div className="kf-form-group"><label>Master Admin Name *</label><input value={form.masterAdminName} onChange={e=>setForm({...form,masterAdminName:e.target.value})} placeholder="Roy"/></div>
+              <div className="kf-form-group"><label>Master Admin PIN *</label><input type="password" maxLength={6} value={form.masterAdminPin} onChange={e=>setForm({...form,masterAdminPin:e.target.value})} placeholder="••••"/></div>
+            </div>
+            <div className="kf-form-group"><label>Master Admin Email</label><input value={form.masterAdminEmail} onChange={e=>setForm({...form,masterAdminEmail:e.target.value})} placeholder="admin@company.com"/></div>
+            <div className="kf-row" style={{marginTop:8}}><button className="kf-btn secondary" onClick={()=>setShowCreate(false)}>Cancel</button><button className="kf-btn primary" onClick={createCompany}><Save size={16}/>Create Company</button></div>
           </div>
-        </header>
-        <div className="kf-content">
-          {view === 'dashboard' && <Dashboard stats={stats} estimates={filteredEstimates} invoices={filteredInvoices} customers={sorted} getName={getName} onSelectEstimate={e => setEditingEstimate(e)}/>}
-          {view === 'customers' && <CustomersList customers={sorted} vehicles={vehicles} getName={getName} search={search} onSelect={c => {setSelected(c);setModal('custDetail');}} onAdd={() => setModal('custAdd')}/>}
-          {view === 'vehicles' && <VehiclesList vehicles={vehicles} customers={sorted} getName={getName} search={search} onAdd={() => setModal('vehAdd')}/>}
-          {view === 'estimates' && <EstimatesList estimates={filteredEstimates} customers={sorted} vehicles={vehicles} locations={locations} getName={getName} onSelect={e => setEditingEstimate(e)} onCreate={handleNewEstimate}/>}
-          {view === 'invoices' && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i => setEditingEstimate(i)}/>}
-          {view === 'canned' && <CannedItemsView cannedItems={cannedItems} setCannedItems={setCannedItems} settings={settings} notify={notify}/>}
-          {view === 'messages' && <MessagesView/>}
-          {view === 'settings' && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} currentUser={currentUser} notify={notify}/>}
+        )}
+
+        <div className="kf-sa-companies">
+          <h2><Globe size={20}/> Companies <span className="kf-badge">{companies.length}</span></h2>
+          {loading ? <div className="kf-loading"><Loader2 size={32} className="spin"/></div> : companies.length === 0 ? (
+            <div className="kf-empty"><Building2 size={60}/><p>No companies yet. Create one to get started.</p></div>
+          ) : (
+            <div className="kf-sa-company-list">
+              {companies.map(c => (
+                <div key={c.id} className={`kf-sa-company-row ${c.suspended ? 'suspended' : ''}`}>
+                  <div className="kf-sa-co-icon"><Building2 size={22}/></div>
+                  <div className="kf-sa-co-info">
+                    <div className="kf-name">{c.name} {c.suspended && <span className="kf-badge danger">Suspended</span>}</div>
+                    <div className="kf-sub">ID: <code>{c.id}</code> · Master Admin: {c.masterAdmin} · Created: {c.createdAt?.split('T')[0]}</div>
+                  </div>
+                  <div className="kf-sa-co-actions">
+                    <button className="kf-btn secondary sm" onClick={()=>backupCompany(c.id)} title="Backup DB"><Download size={14}/>Backup</button>
+                    <button className={`kf-btn sm ${c.suspended ? 'success' : 'secondary'}`} onClick={()=>toggleSuspend(c)}>
+                      <PowerOff size={14}/>{c.suspended ? 'Unsuspend' : 'Suspend'}
+                    </button>
+                    <button className="kf-btn danger sm" onClick={()=>deleteCompany(c)}><Trash2 size={14}/>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      </main>
-      {modal === 'custAdd' && <CustomerForm onClose={closeModal} onSave={c => {handleAddCustomer(c);closeModal();notify('Customer added');}}/>}
-      {modal === 'custDetail' && selected && <CustomerDetail customer={selected} vehicles={vehicles.filter(v=>v.customerId===selected.id)} getName={getName} onClose={closeModal}/>}
-      {modal === 'vehAdd' && <VehicleForm customers={sorted} getName={getName} onClose={closeModal} onSave={v => {handleAddVehicle(v);closeModal();notify('Vehicle added');}} notify={notify}/>}
-      {modal === 'invDetail' && selected && <InvoiceDetail invoice={selected} customer={customers.find(c=>c.id===selected.customerId)} vehicle={vehicles.find(v=>v.id===selected.vehicleId)} settings={settings} getName={getName} onClose={closeModal} onRevert={() => { handleRevertToEstimate(selected); closeModal(); }} onPay={p => {const upd={...selected,payments:[...(selected.payments||[]),p],balance:selected.balance-p.amount,status:selected.balance-p.amount<=0?'paid':'partial'};setInvoices(invoices.map(i=>i.id===selected.id?upd:i));setSelected(upd);notify('Payment recorded');}}/>}
+      </div>
     </div>
   );
 }
 
-function LoginScreen({users, onLogin}) {
+// ─── Super Admin Login ────────────────────────────────────────────────────────
+function SuperAdminLogin({ onLogin, onBack }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/superadmin/login`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ username, password })
+      });
+      if (res.ok) { onLogin(); }
+      else setError('Invalid credentials');
+    } catch { setError('Connection error'); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="kf-login">
+      <div className="kf-login-box">
+        <div className="kf-login-header"><Shield size={40}/><h1>Super Admin</h1><p>Komando Console</p></div>
+        <div className="kf-form-group"><label>Username</label><input value={username} onChange={e=>setUsername(e.target.value)} autoFocus/></div>
+        <div className="kf-form-group"><label>Password</label><input type="password" value={password} onChange={e=>setPassword(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()}/></div>
+        {error && <div className="kf-error"><AlertCircle size={16}/>{error}</div>}
+        <button className="kf-btn primary full" onClick={handleLogin} disabled={loading}>{loading?<Loader2 size={16} className="spin"/>:<Lock size={16}/>}Login</button>
+        <button className="kf-btn secondary full" style={{marginTop:8}} onClick={onBack}><ArrowLeft size={16}/>Back</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Company Selector (login screen) ─────────────────────────────────────────
+function CompanySelector({ onSelectCompany, onSuperAdmin }) {
+  const [companies, setCompanies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/companies`)
+      .then(r => r.json()).then(setCompanies).catch(()=>{}).finally(()=>setLoading(false));
+  }, []);
+
+  const filtered = companies.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="kf-login">
+      <div className="kf-login-box">
+        <div className="kf-login-header"><CircleDot size={40}/><h1>Komando</h1><p>Shop Management</p></div>
+        {loading ? <div className="kf-loading" style={{padding:40}}><Loader2 size={32} className="spin"/></div> : companies.length === 0 ? (
+          <div style={{textAlign:'center',padding:'20px 0'}}>
+            <Building2 size={40} style={{color:'var(--text-dim)',marginBottom:12}}/>
+            <p style={{color:'var(--text-dim)'}}>No companies configured yet.</p>
+          </div>
+        ) : (
+          <>
+            {companies.length > 4 && (
+              <div className="kf-search" style={{marginBottom:12}}>
+                <Search size={16}/><input placeholder="Search companies..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              </div>
+            )}
+            <div className="kf-login-users">
+              <h3>Select Your Company</h3>
+              {filtered.map(c => (
+                <button key={c.id} className="kf-login-user" onClick={() => onSelectCompany(c)}>
+                  <div className="kf-sa-co-icon sm"><Building2 size={18}/></div>
+                  <div><div className="kf-name">{c.name}</div></div>
+                  <ChevronRight size={20}/>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <button className="kf-sa-link" onClick={onSuperAdmin}><Shield size={13}/>Super Admin</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── User Login (after company selected) ─────────────────────────────────────
+function UserLogin({ company, users, onLogin, onBack }) {
   const [selectedUser, setSelectedUser] = useState(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -476,28 +357,35 @@ function LoginScreen({users, onLogin}) {
   return (
     <div className="kf-login">
       <div className="kf-login-box">
-        <div className="kf-login-header"><CircleDot size={40}/><h1>Komando</h1><p>Shop Management</p></div>
+        <div className="kf-login-header">
+          <CircleDot size={36}/>
+          <h1>{company.name}</h1>
+          <p>Select your account</p>
+        </div>
         {!selectedUser ? (
-          <div className="kf-login-users">
-            <h3>Select User</h3>
-            {users.map(u => (
-              <button key={u.id} className="kf-login-user" onClick={() => setSelectedUser(u)}>
-                <div className="kf-avatar lg">{u.name.charAt(0)}</div>
-                <div><div className="kf-name">{u.name}</div><div className="kf-sub">{u.role}</div></div>
-                <ChevronRight size={20}/>
-              </button>
-            ))}
-          </div>
+          <>
+            <div className="kf-login-users">
+              {users.length === 0 ? <p style={{color:'var(--text-dim)',textAlign:'center'}}>No users found.</p> :
+                users.map(u => (
+                  <button key={u.id} className="kf-login-user" onClick={() => setSelectedUser(u)}>
+                    <div className="kf-avatar lg">{u.name.charAt(0)}</div>
+                    <div><div className="kf-name">{u.name}</div><div className="kf-sub">{u.role.replace('_',' ')}</div></div>
+                    <ChevronRight size={20}/>
+                  </button>
+                ))
+              }
+            </div>
+            <button className="kf-back-btn" style={{marginTop:12}} onClick={onBack}><ArrowLeft size={16}/>Back to Companies</button>
+          </>
         ) : (
           <div className="kf-login-pin">
-            <button className="kf-back-btn" onClick={() => {setSelectedUser(null);setPin('');setError('');}}><ArrowLeft size={18}/>Back</button>
+            <button className="kf-back-btn" onClick={()=>{setSelectedUser(null);setPin('');setError('');}}><ArrowLeft size={18}/>Back</button>
             <div className="kf-avatar xl">{selectedUser.name.charAt(0)}</div>
             <h3>{selectedUser.name}</h3>
-            <div className="kf-sub" style={{textAlign:'center',marginBottom:8}}>{selectedUser.role}</div>
+            <div className="kf-sub" style={{textAlign:'center',marginBottom:8}}>{selectedUser.role.replace('_',' ')}</div>
             {error && <div className="kf-error"><AlertCircle size={16}/>{error}</div>}
-            <div className="kf-form-group">
-              <label>Enter PIN</label>
-              <input type="password" maxLength={6} value={pin} onChange={e => setPin(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleLogin()} placeholder="••••" autoFocus/>
+            <div className="kf-form-group"><label>Enter PIN</label>
+              <input type="password" maxLength={6} value={pin} onChange={e=>setPin(e.target.value)} onKeyPress={e=>e.key==='Enter'&&handleLogin()} placeholder="••••" autoFocus/>
             </div>
             <button className="kf-btn primary full" onClick={handleLogin}><Lock size={16}/>Login</button>
           </div>
@@ -507,37 +395,302 @@ function LoginScreen({users, onLogin}) {
   );
 }
 
-function Dashboard({stats, estimates, invoices, customers, getName, onSelectEstimate}) {
+// ─── Main App ─────────────────────────────────────────────────────────────────
+export default function App() {
+  // Auth state
+  const [screen, setScreen] = useState('company-select'); // 'company-select' | 'user-login' | 'app' | 'superadmin-login' | 'superadmin'
+  const [selectedCompany, setSelectedCompany] = useState(() => { try { return JSON.parse(localStorage.getItem('kf_company') || 'null'); } catch { return null; }});
+  const [currentUser, setCurrentUser] = useState(() => { try { return JSON.parse(localStorage.getItem('kf_currentUser') || 'null'); } catch { return null; }});
+
+  // App data (company-scoped)
+  const [isLoading, setIsLoading] = useState(false);
+  const [view, setView] = useState('dashboard');
+  const [customers, setCustomers] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [estimates, setEstimates] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [cannedItems, setCannedItems] = useState({ categories: [], items: [] });
+  const [selected, setSelected] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [search, setSearch] = useState('');
+  const [toast, setToast] = useState(null);
+  const [editingEstimate, setEditingEstimate] = useState(null);
+  const [locationFilter, setLocationFilter] = useState(null);
+
+  const cid = selectedCompany?.id;
+  const notify = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
+
+  // Restore session on mount
+  useEffect(() => {
+    const savedCompany = localStorage.getItem('kf_company');
+    const savedUser = localStorage.getItem('kf_currentUser');
+    if (savedCompany && savedUser) {
+      setScreen('app');
+    } else if (savedCompany) {
+      setScreen('user-login');
+    }
+  }, []);
+
+  // Load company data when entering app screen
+  useEffect(() => {
+    if (screen === 'app' && cid) {
+      setIsLoading(true);
+      loadAllFromAPI(cid).then(data => {
+        const d = data || {};
+        setCustomers(d.customers || loadData(cid,'customers',[]));
+        setVehicles(d.vehicles   || loadData(cid,'vehicles',[]));
+        setEstimates(d.estimates || loadData(cid,'estimates',[]));
+        setInvoices(d.invoices   || loadData(cid,'invoices',[]));
+        setUsers(d.users         || loadData(cid,'users',[]));
+        setLocations(d.locations || loadData(cid,'locations',[{id:'loc1',name:'Main Location',address:'',phone:'',email:'',laborRate:null,taxRate:null}]));
+        setSettings(d.settings   || loadData(cid,'settings',DEFAULT_SETTINGS));
+        setCannedItems(d.cannedItems || loadData(cid,'cannedItems',{categories:[],items:[]}));
+        setIsLoading(false);
+      });
+    }
+  }, [screen, cid]);
+
+  // Persist data changes
+  useEffect(() => { if (!isLoading && cid) saveData(cid,'customers',customers); }, [customers]);
+  useEffect(() => { if (!isLoading && cid) saveData(cid,'vehicles',vehicles); }, [vehicles]);
+  useEffect(() => { if (!isLoading && cid) saveData(cid,'estimates',estimates); }, [estimates]);
+  useEffect(() => { if (!isLoading && cid) saveData(cid,'invoices',invoices); }, [invoices]);
+  useEffect(() => { if (!isLoading && cid) saveData(cid,'users',users); }, [users]);
+  useEffect(() => { if (!isLoading && cid) saveData(cid,'locations',locations); }, [locations]);
+  useEffect(() => { if (!isLoading && cid) saveData(cid,'settings',settings); }, [settings]);
+  useEffect(() => { if (!isLoading && cid) saveData(cid,'cannedItems',cannedItems); }, [cannedItems]);
+
+  // ── Auth handlers ─────────────────────────────────────────────────────────
+  const handleSelectCompany = (company) => {
+    setSelectedCompany(company);
+    localStorage.setItem('kf_company', JSON.stringify(company));
+    // Load users for this company for the login screen
+    loadAllFromAPI(company.id).then(data => {
+      if (data?.users) setUsers(data.users);
+    });
+    setScreen('user-login');
+  };
+
+  const handleUserLogin = (user) => {
+    setCurrentUser(user);
+    localStorage.setItem('kf_currentUser', JSON.stringify(user));
+    setLocationFilter(user.role === 'technician' ? (user.locationId || null) : null);
+    setScreen('app');
+    notify(`Welcome, ${user.name}!`);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('kf_currentUser');
+    setView('dashboard');
+    setEditingEstimate(null);
+    setLocationFilter(null);
+    setScreen('user-login');
+  };
+
+  const handleSwitchCompany = () => {
+    setCurrentUser(null);
+    setSelectedCompany(null);
+    localStorage.removeItem('kf_currentUser');
+    localStorage.removeItem('kf_company');
+    setScreen('company-select');
+  };
+
+  // ── Screen routing ────────────────────────────────────────────────────────
+  if (screen === 'superadmin-login') return <SuperAdminLogin onLogin={()=>setScreen('superadmin')} onBack={()=>setScreen('company-select')}/>;
+  if (screen === 'superadmin') return <SuperAdminConsole onExit={()=>setScreen('company-select')}/>;
+  if (screen === 'company-select') return <CompanySelector onSelectCompany={handleSelectCompany} onSuperAdmin={()=>setScreen('superadmin-login')}/>;
+  if (screen === 'user-login') return <UserLogin company={selectedCompany} users={users} onLogin={handleUserLogin} onBack={handleSwitchCompany}/>;
+
+  // ── App shell ─────────────────────────────────────────────────────────────
+  const getName = c => c ? (c.type==='fleet' ? c.companyName : `${c.firstName} ${c.lastName}`) : '';
+  const sorted = [...customers].sort((a,b)=>getName(a).localeCompare(getName(b)));
+  const closeModal = () => { setModal(null); setSelected(null); };
+  const getLocation = id => locations.find(l=>l.id===id) || null;
+  const getEffectiveSettings = locationId => resolveSettings(settings, getLocation(locationId));
+  const activeLocationId = locationFilter;
+  const filteredEstimates = activeLocationId ? estimates.filter(e=>e.locationId===activeLocationId) : estimates;
+  const filteredInvoices  = activeLocationId ? invoices.filter(i=>i.locationId===activeLocationId)  : invoices;
+
+  const stats = {
+    customers: customers.length,
+    pending: filteredEstimates.filter(e=>e.status==='pending').length,
+    unpaid: filteredInvoices.filter(i=>i.status!=='paid').length,
+    revenue: filteredInvoices.filter(i=>i.status==='paid').reduce((s,i)=>s+(i.finalTotal||i.total),0)
+  };
+
+  const getNextDocNumber = () => {
+    const allNums = [...estimates.map(e=>parseInt(e.number?.replace('EST-','')||'0')), ...invoices.map(i=>parseInt(i.number?.replace('INV-','')||'0'))];
+    return Math.max(0,...allNums) + 1;
+  };
+
+  const handleNewEstimate = () => {
+    const docNum = getNextDocNumber();
+    const newEst = {
+      id:`e${Date.now()}`, docNumber:docNum,
+      number:`EST-${String(docNum).padStart(4,'0')}`,
+      locationId: currentUser?.locationId || locations[0]?.id || null,
+      customerId:null, vehicleId:null, title:'', customerComments:'', recommendations:'',
+      items:[], inspections:[], internalNotes:[],
+      createdAt:new Date().toISOString().split('T')[0], createdBy:currentUser?.id, status:'pending'
+    };
+    setEstimates([...estimates, newEst]);
+    setEditingEstimate(newEst);
+  };
+
+  const handleDocumentSave = (doc) => {
+    if (doc.docType==='invoice') setInvoices(invoices.map(i=>i.id===doc.id?doc:i));
+    else setEstimates(estimates.map(e=>e.id===doc.id?doc:e));
+    notify('Saved');
+  };
+
+  const handleAddCustomer = (cust) => {
+    const c = {...cust,id:`c${Date.now()}`,createdAt:new Date().toISOString().split('T')[0],totalSpent:0};
+    setCustomers([...customers,c]); return c;
+  };
+  const handleAddVehicle = (veh) => { const v={...veh,id:`v${Date.now()}`}; setVehicles([...vehicles,v]); return v; };
+  const handleUpdateCustomer = (cust) => setCustomers(customers.map(c=>c.id===cust.id?cust:c));
+
+  const handleConvertToInvoice = (doc) => {
+    const docNum = doc.docNumber || parseInt(doc.number?.replace('EST-','')||'0');
+    const inv = {...doc,id:doc.id,docNumber:docNum,number:`INV-${String(docNum).padStart(4,'0')}`,
+      docType:'invoice',status:'unpaid',convertedAt:new Date().toISOString().split('T')[0],
+      dueAt:new Date(Date.now()+30*86400000).toISOString().split('T')[0],payments:[],balance:doc.finalTotal||doc.total||0};
+    setEstimates(estimates.filter(e=>e.id!==doc.id));
+    setInvoices([...invoices,inv]);
+    setEditingEstimate(inv);
+    notify(`Converted to ${inv.number}!`);
+  };
+
+  const handleRevertToEstimate = (inv) => {
+    const docNum = inv.docNumber||parseInt(inv.number?.replace('INV-','')||'0');
+    const est = {...inv,id:inv.id,docNumber:docNum,number:`EST-${String(docNum).padStart(4,'0')}`,
+      docType:'estimate',status:'approved',payments:undefined,balance:undefined,dueAt:undefined,convertedAt:undefined};
+    setInvoices(invoices.filter(i=>i.id!==inv.id));
+    setEstimates([...estimates,est]);
+    setEditingEstimate(est);
+    notify(`Reverted to ${est.number}!`);
+  };
+
+  if (editingEstimate) {
+    const docLocationId = editingEstimate.locationId || currentUser?.locationId || locations[0]?.id;
+    return (
+      <EstimatePage
+        document={editingEstimate} customers={sorted} vehicles={vehicles} users={users} locations={locations}
+        settings={getEffectiveSettings(docLocationId)} cannedItems={cannedItems} currentUser={currentUser}
+        getName={getName} onSave={handleDocumentSave} onAddCustomer={handleAddCustomer}
+        onAddVehicle={handleAddVehicle} onUpdateCustomer={handleUpdateCustomer}
+        onConvert={handleConvertToInvoice} onRevert={handleRevertToEstimate}
+        onClose={()=>setEditingEstimate(null)} notify={notify}
+      />
+    );
+  }
+
+  const isMaster = currentUser?.role === 'master_admin';
+  const isAdmin  = currentUser?.role === 'admin' || isMaster;
+
+  const navItems = [
+    {id:'dashboard',icon:Home,label:'Dashboard'},{id:'customers',icon:Users,label:'Customers'},
+    {id:'vehicles',icon:Car,label:'Vehicles'},{id:'estimates',icon:FileText,label:'Estimates'},
+    {id:'invoices',icon:DollarSign,label:'Invoices'},{id:'canned',icon:Layers,label:'Canned Items'},
+    {id:'messages',icon:MessageSquare,label:'Messages'},{id:'settings',icon:Settings,label:'Settings'},
+  ];
+
+  return (
+    <div className="kf-app">
+      {toast && <div className={`kf-toast ${toast.type}`}><CheckCircle size={16}/>{toast.msg}</div>}
+      {isLoading && <div className="kf-loading-overlay"><Loader2 size={40} className="spin"/></div>}
+      <aside className="kf-sidebar">
+        <div className="kf-logo"><CircleDot size={26}/><span>Komando</span></div>
+        <div className="kf-company-badge" onClick={handleSwitchCompany} title="Switch company">
+          <Building2 size={14}/><span>{selectedCompany?.name}</span>
+        </div>
+        <button className="kf-new-btn" onClick={handleNewEstimate}><Zap size={20}/>New Estimate</button>
+        <nav className="kf-nav">
+          {navItems.map(n=><button key={n.id} className={`kf-nav-item ${view===n.id?'active':''}`} onClick={()=>setView(n.id)}><n.icon size={20}/>{n.label}</button>)}
+        </nav>
+        <div className="kf-user-info">
+          <div className="kf-avatar">{currentUser?.name?.charAt(0)}</div>
+          <div className="kf-user-details">
+            <span className="kf-user-name">{currentUser?.name}</span>
+            <span className="kf-user-role">{currentUser?.role?.replace('_',' ')}{currentUser?.locationId&&getLocation(currentUser.locationId)?` · ${getLocation(currentUser.locationId).name}`:''}</span>
+          </div>
+          <button className="kf-icon-btn" onClick={handleLogout} title="Logout"><LogOut size={18}/></button>
+        </div>
+      </aside>
+
+      <main className="kf-main">
+        <header className="kf-header">
+          <h1>{navItems.find(n=>n.id===view)?.label||'Dashboard'}</h1>
+          <div className="kf-header-right">
+            {(view==='estimates'||view==='invoices'||view==='dashboard') && locations.length>1 && currentUser?.role!=='technician' && (
+              <div className="kf-loc-filter">
+                <MapPin size={15}/>
+                <select value={locationFilter||''} onChange={e=>setLocationFilter(e.target.value||null)}>
+                  <option value="">All Locations</option>
+                  {locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+            )}
+            <button className="kf-header-btn" onClick={handleNewEstimate}><Zap size={18}/>New Estimate</button>
+            <div className="kf-search"><Search size={18}/><input placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
+          </div>
+        </header>
+        <div className="kf-content">
+          {view==='dashboard'  && <Dashboard stats={stats} estimates={filteredEstimates} invoices={filteredInvoices} customers={sorted} getName={getName} onSelectEstimate={e=>setEditingEstimate(e)}/>}
+          {view==='customers'  && <CustomersList customers={sorted} vehicles={vehicles} getName={getName} search={search} onSelect={c=>{setSelected(c);setModal('custDetail');}} onAdd={()=>setModal('custAdd')}/>}
+          {view==='vehicles'   && <VehiclesList vehicles={vehicles} customers={sorted} getName={getName} search={search} onAdd={()=>setModal('vehAdd')}/>}
+          {view==='estimates'  && <EstimatesList estimates={filteredEstimates} customers={sorted} vehicles={vehicles} locations={locations} getName={getName} onSelect={e=>setEditingEstimate(e)} onCreate={handleNewEstimate}/>}
+          {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)}/>}
+          {view==='canned'     && <CannedItemsView cannedItems={cannedItems} setCannedItems={setCannedItems} settings={settings} notify={notify}/>}
+          {view==='messages'   && <MessagesView/>}
+          {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
+        </div>
+      </main>
+
+      {modal==='custAdd'    && <CustomerForm onClose={closeModal} onSave={c=>{handleAddCustomer(c);closeModal();notify('Customer added');}}/>}
+      {modal==='custDetail' && selected && <CustomerDetail customer={selected} vehicles={vehicles.filter(v=>v.customerId===selected.id)} getName={getName} onClose={closeModal}/>}
+      {modal==='vehAdd'     && <VehicleForm customers={sorted} getName={getName} onClose={closeModal} onSave={v=>{handleAddVehicle(v);closeModal();notify('Vehicle added');}} notify={notify}/>}
+      {modal==='invDetail'  && selected && <InvoiceDetail invoice={selected} customer={customers.find(c=>c.id===selected.customerId)} vehicle={vehicles.find(v=>v.id===selected.vehicleId)} settings={settings} getName={getName} onClose={closeModal} onRevert={()=>{handleRevertToEstimate(selected);closeModal();}} onPay={p=>{const upd={...selected,payments:[...(selected.payments||[]),p],balance:selected.balance-p.amount,status:selected.balance-p.amount<=0?'paid':'partial'};setInvoices(invoices.map(i=>i.id===selected.id?upd:i));setSelected(upd);notify('Payment recorded');}}/>}
+    </div>
+  );
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+function Dashboard({stats,estimates,invoices,customers,getName,onSelectEstimate}) {
   return <div>
     <div className="kf-stats">{[{icon:Users,label:'Customers',value:stats.customers,color:'#E63946'},{icon:FileText,label:'Pending',value:stats.pending,color:'#E9C46A'},{icon:DollarSign,label:'Unpaid',value:stats.unpaid,color:'#457B9D'},{icon:BarChart3,label:'Revenue',value:`$${stats.revenue.toLocaleString()}`,color:'#2D936C'}].map((s,i)=><div key={i} className="kf-stat"><div className="kf-stat-icon" style={{background:`${s.color}22`,color:s.color}}><s.icon size={24}/></div><div><div className="kf-stat-label">{s.label}</div><div className="kf-stat-value">{s.value}</div></div></div>)}</div>
-    <div className="kf-grid"><div className="kf-card"><h3>Recent Estimates</h3>{estimates.slice(-5).reverse().map(e=><div key={e.id} className="kf-card-row clickable" onClick={() => onSelectEstimate(e)}><span>{e.number}</span><span>{e.title || getName(customers.find(c=>c.id===e.customerId)) || 'No customer'}</span><span>${(e.finalTotal||e.total||0).toFixed(2)}</span><span className={`kf-badge ${e.status}`}>{e.status}</span></div>)}{estimates.length===0&&<div className="kf-empty-sm">No estimates</div>}</div><div className="kf-card"><h3>Unpaid Invoices</h3>{invoices.filter(i=>i.status!=='paid').slice(0,5).map(i=><div key={i.id} className="kf-card-row"><span>{i.number}</span><span>{getName(customers.find(c=>c.id===i.customerId))}</span><span className="red">${i.balance.toFixed(2)}</span></div>)}{invoices.filter(i=>i.status!=='paid').length===0&&<div className="kf-empty-sm"><CheckCircle size={20}/>All paid!</div>}</div></div>
+    <div className="kf-grid"><div className="kf-card"><h3>Recent Estimates</h3>{estimates.slice(-5).reverse().map(e=><div key={e.id} className="kf-card-row clickable" onClick={()=>onSelectEstimate(e)}><span>{e.number}</span><span>{e.title||getName(customers.find(c=>c.id===e.customerId))||'No customer'}</span><span>${(e.finalTotal||e.total||0).toFixed(2)}</span><span className={`kf-badge ${e.status}`}>{e.status}</span></div>)}{estimates.length===0&&<div className="kf-empty-sm">No estimates</div>}</div><div className="kf-card"><h3>Unpaid Invoices</h3>{invoices.filter(i=>i.status!=='paid').slice(0,5).map(i=><div key={i.id} className="kf-card-row"><span>{i.number}</span><span>{getName(customers.find(c=>c.id===i.customerId))}</span><span className="red">${i.balance.toFixed(2)}</span></div>)}{invoices.filter(i=>i.status!=='paid').length===0&&<div className="kf-empty-sm"><CheckCircle size={20}/>All paid!</div>}</div></div>
   </div>;
 }
 
-function CustomersList({customers, vehicles, getName, search, onSelect, onAdd}) {
-  const [filter, setFilter] = useState('all');
-  const list = customers.filter(c => (filter==='all'||c.type===filter) && (!search||getName(c).toLowerCase().includes(search.toLowerCase())));
+function CustomersList({customers,vehicles,getName,search,onSelect,onAdd}) {
+  const [filter,setFilter]=useState('all');
+  const list=customers.filter(c=>(filter==='all'||c.type===filter)&&(!search||getName(c).toLowerCase().includes(search.toLowerCase())));
   return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onAdd}><Plus size={16}/>Add</button><div style={{flex:1}}/><div className="kf-tabs">{['all','public','fleet'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div></div><div className="kf-card"><table><thead><tr><th>Customer</th><th>Contact</th><th>Vehicles</th><th>Type</th></tr></thead><tbody>{list.map(c=><tr key={c.id} onClick={()=>onSelect(c)}><td>{getName(c)}</td><td className="kf-sub">{c.phone}</td><td>{vehicles.filter(v=>v.customerId===c.id).length}</td><td><span className={`kf-badge ${c.type}`}>{c.type}</span></td></tr>)}</tbody></table>{list.length===0&&<div className="kf-empty"><Users size={40}/></div>}</div></div>;
 }
 
-function VehiclesList({vehicles, customers, getName, search, onAdd}) {
-  const list = vehicles.filter(v => !search || `${v.year} ${v.make} ${v.model}`.toLowerCase().includes(search.toLowerCase()));
+function VehiclesList({vehicles,customers,getName,search,onAdd}) {
+  const list=vehicles.filter(v=>!search||`${v.year} ${v.make} ${v.model}`.toLowerCase().includes(search.toLowerCase()));
   return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onAdd}><Plus size={16}/>Add</button></div><div className="kf-card"><table><thead><tr><th>Vehicle</th><th>VIN</th><th>Plate</th><th>Owner</th></tr></thead><tbody>{list.map(v=><tr key={v.id}><td>{v.year} {v.make} {v.model}</td><td><code>{v.vin?.slice(-8)}</code></td><td>{v.plate}</td><td>{getName(customers.find(c=>c.id===v.customerId))}</td></tr>)}</tbody></table>{list.length===0&&<div className="kf-empty"><Car size={40}/></div>}</div></div>;
 }
 
-function EstimatesList({estimates, customers, vehicles, locations, getName, onSelect, onCreate}) {
-  const [filter, setFilter] = useState('all');
-  const list = estimates.filter(e => filter==='all'||e.status===filter);
-  const getLocName = id => locations?.find(l => l.id === id)?.name || '';
-  const showLoc = locations?.length > 1;
+function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,onCreate}) {
+  const [filter,setFilter]=useState('all');
+  const list=estimates.filter(e=>filter==='all'||e.status===filter);
+  const getLocName=id=>locations?.find(l=>l.id===id)?.name||'';
+  const showLoc=locations?.length>1;
   return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onCreate}><Zap size={16}/>New</button><div style={{flex:1}}/><div className="kf-tabs">{['all','pending','approved','converted'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div></div><div className="kf-card"><table><thead><tr><th>Estimate</th><th>Title</th><th>Customer</th><th>Vehicle</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Status</th></tr></thead><tbody>{list.map(e=>{const c=customers.find(x=>x.id===e.customerId);const v=vehicles.find(x=>x.id===e.vehicleId);return<tr key={e.id} onClick={()=>onSelect(e)}><td><strong>{e.number}</strong></td><td>{e.title||'-'}</td><td>{c?getName(c):'-'}</td><td>{v?`${v.year} ${v.make}`:'-'}</td>{showLoc&&<td><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(e.locationId)}</span></td>}<td>${(e.finalTotal||0).toFixed(2)}</td><td><span className={`kf-badge ${e.status}`}>{e.status}</span></td></tr>;})}</tbody></table>{list.length===0&&<div className="kf-empty"><FileText size={40}/></div>}</div></div>;
 }
 
-function InvoicesList({invoices, customers, locations, getName, onSelect}) {
-  const [filter, setFilter] = useState('all');
-  const list = invoices.filter(i => filter==='all'||i.status===filter);
-  const getLocName = id => locations?.find(l => l.id === id)?.name || '';
-  const showLoc = locations?.length > 1;
+function InvoicesList({invoices,customers,locations,getName,onSelect}) {
+  const [filter,setFilter]=useState('all');
+  const list=invoices.filter(i=>filter==='all'||i.status===filter);
+  const getLocName=id=>locations?.find(l=>l.id===id)?.name||'';
+  const showLoc=locations?.length>1;
   return <div><div className="kf-actions"><div style={{flex:1}}/><div className="kf-tabs">{['all','unpaid','partial','paid'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div></div><div className="kf-card"><table><thead><tr><th>Invoice</th><th>Customer</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Balance</th><th>Status</th></tr></thead><tbody>{list.map(i=>{const c=customers.find(x=>x.id===i.customerId);return<tr key={i.id} onClick={()=>onSelect(i)}><td><strong>{i.number}</strong></td><td>{getName(c)}</td>{showLoc&&<td><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}<td>${(i.finalTotal||i.total).toFixed(2)}</td><td className={i.balance>0?'red':'green'}>${i.balance.toFixed(2)}</td><td><span className={`kf-badge ${i.status}`}>{i.status}</span></td></tr>;})}</tbody></table>{list.length===0&&<div className="kf-empty"><DollarSign size={40}/></div>}</div></div>;
 }
 
@@ -545,270 +698,185 @@ function MessagesView() {
   return <div className="kf-empty" style={{height:400}}><MessageSquare size={60}/><p>Messaging coming soon</p></div>;
 }
 
-function SettingsView({settings, setSettings, users, setUsers, locations, setLocations, currentUser, notify}) {
-  const [localSettings, setLocalSettings] = useState(settings);
-  const [tab, setTab] = useState('general');
+function SettingsView({settings,setSettings,users,setUsers,locations,setLocations,currentUser,company,notify}) {
+  const [localSettings,setLocalSettings]=useState(settings);
+  const [tab,setTab]=useState('general');
+  const [newUser,setNewUser]=useState({name:'',email:'',pin:'',role:'technician',locationId:locations[0]?.id||''});
+  const [showAddUser,setShowAddUser]=useState(false);
+  const [editingUser,setEditingUser]=useState(null);
+  const [newLoc,setNewLoc]=useState({name:'',address:'',phone:'',email:'',laborRate:'',taxRate:''});
+  const [showAddLoc,setShowAddLoc]=useState(false);
+  const [editingLoc,setEditingLoc]=useState(null);
+  const [restoring,setRestoring]=useState(false);
+  const restoreRef=useRef();
 
-  // Users state
-  const [newUser, setNewUser] = useState({name:'', email:'', pin:'', role:'tech', locationId: locations[0]?.id || ''});
-  const [showAddUser, setShowAddUser] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
+  const isMaster=currentUser.role==='master_admin';
+  const isAdmin=currentUser.role==='admin'||isMaster;
+  const saveSettings=()=>{setSettings(localSettings);notify('Settings saved');};
 
-  // Locations state
-  const [newLoc, setNewLoc] = useState({name:'', address:'', phone:'', email:'', laborRate:'', taxRate:''});
-  const [showAddLoc, setShowAddLoc] = useState(false);
-  const [editingLoc, setEditingLoc] = useState(null);
-
-  const isAdmin = currentUser.role === 'admin';
-  const isManager = currentUser.role === 'manager';
-
-  const saveSettings = () => { setSettings(localSettings); notify('Settings saved'); };
-
-  // --- User CRUD ---
-  const addUser = () => {
-    if (!newUser.name || !newUser.pin) { notify('Name and PIN required', 'error'); return; }
-    if (isManager && newUser.role !== 'tech') { notify('Managers can only add techs', 'error'); return; }
-    const u = {...newUser, id: `u${Date.now()}`, locationId: newUser.locationId || locations[0]?.id || ''};
-    setUsers([...users, u]);
-    setNewUser({name:'', email:'', pin:'', role:'tech', locationId: locations[0]?.id || ''});
-    setShowAddUser(false);
-    notify('User added');
+  const addUser=()=>{
+    if(!newUser.name||!newUser.pin){notify('Name and PIN required','error');return;}
+    if(!isMaster&&newUser.role!=='technician'){notify('Admins can only add technicians','error');return;}
+    const u={...newUser,id:`u${Date.now()}`,companyId:company?.id};
+    setUsers([...users,u]);setNewUser({name:'',email:'',pin:'',role:'technician',locationId:locations[0]?.id||''});
+    setShowAddUser(false);notify('User added');
   };
-  const saveEditUser = () => {
-    if (!editingUser.name || !editingUser.pin) { notify('Name and PIN required', 'error'); return; }
-    setUsers(users.map(u => u.id === editingUser.id ? editingUser : u));
-    setEditingUser(null);
-    notify('User updated');
+  const saveEditUser=()=>{
+    if(!editingUser.name||!editingUser.pin){notify('Name and PIN required','error');return;}
+    setUsers(users.map(u=>u.id===editingUser.id?editingUser:u));setEditingUser(null);notify('User updated');
   };
-  const deleteUser = (id) => {
-    if (id === currentUser.id) { notify('Cannot delete yourself', 'error'); return; }
-    const target = users.find(u => u.id === id);
-    if (!canManageUser(currentUser, target)) { notify('Permission denied', 'error'); return; }
-    if (confirm('Delete user?')) { setUsers(users.filter(u => u.id !== id)); notify('Deleted'); }
+  const deleteUser=(id)=>{
+    if(id===currentUser.id){notify('Cannot delete yourself','error');return;}
+    const target=users.find(u=>u.id===id);
+    if(!target)return;
+    if(target.role==='master_admin'){notify('Cannot delete master admin','error');return;}
+    if(confirm('Delete user?')){setUsers(users.filter(u=>u.id!==id));notify('Deleted');}
   };
 
-  // --- Location CRUD (admin only) ---
-  const addLoc = () => {
-    if (!newLoc.name) { notify('Location name required', 'error'); return; }
-    const l = {
-      ...newLoc,
-      id: `loc${Date.now()}`,
-      laborRate: newLoc.laborRate !== '' ? parseFloat(newLoc.laborRate) : null,
-      taxRate: newLoc.taxRate !== '' ? parseFloat(newLoc.taxRate) : null,
-    };
-    setLocations([...locations, l]);
-    setNewLoc({name:'', address:'', phone:'', email:'', laborRate:'', taxRate:''});
-    setShowAddLoc(false);
-    notify('Location added');
+  const addLoc=()=>{
+    if(!newLoc.name){notify('Name required','error');return;}
+    const l={...newLoc,id:`loc${Date.now()}`,laborRate:newLoc.laborRate!==''?parseFloat(newLoc.laborRate):null,taxRate:newLoc.taxRate!==''?parseFloat(newLoc.taxRate):null};
+    setLocations([...locations,l]);setNewLoc({name:'',address:'',phone:'',email:'',laborRate:'',taxRate:''});setShowAddLoc(false);notify('Location added');
   };
-  const saveEditLoc = () => {
-    const updated = {
-      ...editingLoc,
-      laborRate: editingLoc.laborRate !== '' && editingLoc.laborRate !== null ? parseFloat(editingLoc.laborRate) : null,
-      taxRate: editingLoc.taxRate !== '' && editingLoc.taxRate !== null ? parseFloat(editingLoc.taxRate) : null,
-    };
-    setLocations(locations.map(l => l.id === updated.id ? updated : l));
-    setEditingLoc(null);
-    notify('Location updated');
+  const saveEditLoc=()=>{
+    const upd={...editingLoc,laborRate:editingLoc.laborRate!==''&&editingLoc.laborRate!==null?parseFloat(editingLoc.laborRate):null,taxRate:editingLoc.taxRate!==''&&editingLoc.taxRate!==null?parseFloat(editingLoc.taxRate):null};
+    setLocations(locations.map(l=>l.id===upd.id?upd:l));setEditingLoc(null);notify('Location updated');
   };
-  const deleteLoc = (id) => {
-    if (locations.length <= 1) { notify('Cannot delete last location', 'error'); return; }
-    if (users.some(u => u.locationId === id)) { notify('Reassign users before deleting', 'error'); return; }
-    if (confirm('Delete location?')) { setLocations(locations.filter(l => l.id !== id)); notify('Deleted'); }
+  const deleteLoc=(id)=>{
+    if(locations.length<=1){notify('Cannot delete last location','error');return;}
+    if(users.some(u=>u.locationId===id)){notify('Reassign users before deleting','error');return;}
+    if(confirm('Delete location?')){setLocations(locations.filter(l=>l.id!==id));notify('Deleted');}
   };
 
-  const visibleUsers = isAdmin ? users : users.filter(u => u.locationId === currentUser.locationId);
-  const canAddUser = isAdmin || isManager;
+  const handleBackup=()=>window.open(`/api/company/${company?.id}/backup`,'_blank');
+  const handleRestore=async(e)=>{
+    const file=e.target.files[0];if(!file)return;
+    if(!confirm('Restore this backup? Current data will be overwritten.'))return;
+    setRestoring(true);
+    const fd=new FormData();fd.append('file',file);
+    try{const res=await fetch(`/api/company/${company?.id}/restore`,{method:'POST',body:fd});
+      if(res.ok){notify('Restore complete! Refresh the page.');} else notify('Restore failed','error');
+    }catch{notify('Network error','error');}
+    setRestoring(false);e.target.value='';
+  };
 
-  const roleIcon = (role) => role === 'admin' ? <Shield size={13}/> : role === 'manager' ? <UserCog size={13}/> : <Wrench size={13}/>;
+  const visibleUsers=isMaster?users:users.filter(u=>u.locationId===currentUser.locationId);
+  const roleIcon=(role)=>role==='master_admin'?<Shield size={13}/>:role==='admin'?<UserCog size={13}/>:<Wrench size={13}/>;
+  const availableRoles=isMaster?ROLES:ROLES.filter(r=>r.id==='technician');
 
   return (
     <div className="kf-settings">
       <div className="kf-settings-tabs">
         <button className={tab==='general'?'active':''} onClick={()=>setTab('general')}><SlidersHorizontal size={16}/>General</button>
-        {isAdmin && <button className={tab==='locations'?'active':''} onClick={()=>setTab('locations')}><MapPin size={16}/>Locations</button>}
+        {isMaster&&<button className={tab==='locations'?'active':''} onClick={()=>setTab('locations')}><MapPin size={16}/>Locations</button>}
         <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}><Users size={16}/>Users</button>
-        {isAdmin && <button className={tab==='data'?'active':''} onClick={()=>setTab('data')}><Trash2 size={16}/>Data</button>}
+        {isMaster&&<button className={tab==='backup'?'active':''} onClick={()=>setTab('backup')}><Database size={16}/>Backup</button>}
       </div>
 
-      {tab === 'general' && (
+      {tab==='general'&&(
         <div className="kf-settings-grid">
           <div className="kf-card">
             <h3><DollarSign size={20}/> Default Rates</h3>
             <p className="kf-sub" style={{marginBottom:12}}>Used when a location has no override set.</p>
-            <div className="kf-form-group"><label>Labor Rate ($/hr)</label><input type="text" inputMode="decimal" value={localSettings.laborRate} onChange={e => setLocalSettings({...localSettings, laborRate: parseFloat(e.target.value) || 0})}/></div>
-            <div className="kf-form-group"><label>Tax Rate (%)</label><input type="text" inputMode="decimal" value={localSettings.taxRate} onChange={e => setLocalSettings({...localSettings, taxRate: parseFloat(e.target.value) || 0})}/></div>
+            <div className="kf-form-group"><label>Labor Rate ($/hr)</label><input type="text" inputMode="decimal" value={localSettings.laborRate} onChange={e=>setLocalSettings({...localSettings,laborRate:parseFloat(e.target.value)||0})}/></div>
+            <div className="kf-form-group"><label>Tax Rate (%)</label><input type="text" inputMode="decimal" value={localSettings.taxRate} onChange={e=>setLocalSettings({...localSettings,taxRate:parseFloat(e.target.value)||0})}/></div>
             <button className="kf-btn primary" onClick={saveSettings}><Save size={16}/>Save</button>
           </div>
           <div className="kf-card">
-            <h3><Building2 size={20}/> Business</h3>
-            <div className="kf-form-group"><label>Shop Name</label><input value={localSettings.shopName} onChange={e => setLocalSettings({...localSettings, shopName: e.target.value})}/></div>
-            <div className="kf-form-group"><label>Phone</label><input value={localSettings.phone} onChange={e => setLocalSettings({...localSettings, phone: e.target.value})}/></div>
-            <div className="kf-form-group"><label>Email</label><input value={localSettings.email || ''} onChange={e => setLocalSettings({...localSettings, email: e.target.value})}/></div>
+            <h3><Building2 size={20}/> Business Info</h3>
+            <div className="kf-form-group"><label>Shop Name</label><input value={localSettings.shopName} onChange={e=>setLocalSettings({...localSettings,shopName:e.target.value})}/></div>
+            <div className="kf-form-group"><label>Phone</label><input value={localSettings.phone} onChange={e=>setLocalSettings({...localSettings,phone:e.target.value})}/></div>
+            <div className="kf-form-group"><label>Email</label><input value={localSettings.email||''} onChange={e=>setLocalSettings({...localSettings,email:e.target.value})}/></div>
             <button className="kf-btn primary" onClick={saveSettings}><Save size={16}/>Save</button>
           </div>
         </div>
       )}
 
-      {tab === 'locations' && isAdmin && (
+      {tab==='locations'&&isMaster&&(
         <div className="kf-card wide">
-          <div className="kf-section-header">
-            <h3><MapPin size={20}/> Locations</h3>
-            <button className="kf-btn primary sm" onClick={() => setShowAddLoc(true)}><Plus size={14}/>Add Location</button>
-          </div>
-          <p className="kf-sub" style={{marginBottom:16}}>Each location can override global labor rate and tax rate. Leave blank to use global defaults.</p>
-
-          {showAddLoc && (
+          <div className="kf-section-header"><h3><MapPin size={20}/> Locations</h3><button className="kf-btn primary sm" onClick={()=>setShowAddLoc(true)}><Plus size={14}/>Add</button></div>
+          {showAddLoc&&(
             <div className="kf-loc-form">
-              <div className="kf-row">
-                <div className="kf-form-group"><label>Name *</label><input value={newLoc.name} onChange={e=>setNewLoc({...newLoc,name:e.target.value})} placeholder="e.g. Lynnwood"/></div>
-                <div className="kf-form-group"><label>Phone</label><input value={newLoc.phone} onChange={e=>setNewLoc({...newLoc,phone:e.target.value})}/></div>
-              </div>
-              <div className="kf-row">
-                <div className="kf-form-group"><label>Address</label><input value={newLoc.address} onChange={e=>setNewLoc({...newLoc,address:e.target.value})}/></div>
-                <div className="kf-form-group"><label>Email</label><input value={newLoc.email} onChange={e=>setNewLoc({...newLoc,email:e.target.value})}/></div>
-              </div>
-              <div className="kf-row">
-                <div className="kf-form-group"><label>Labor Rate Override ($/hr)</label><input type="number" placeholder={`Default: $${settings.laborRate}`} value={newLoc.laborRate} onChange={e=>setNewLoc({...newLoc,laborRate:e.target.value})}/></div>
-                <div className="kf-form-group"><label>Tax Rate Override (%)</label><input type="number" placeholder={`Default: ${settings.taxRate}%`} value={newLoc.taxRate} onChange={e=>setNewLoc({...newLoc,taxRate:e.target.value})}/></div>
-              </div>
+              <div className="kf-row"><div className="kf-form-group"><label>Name *</label><input value={newLoc.name} onChange={e=>setNewLoc({...newLoc,name:e.target.value})}/></div><div className="kf-form-group"><label>Phone</label><input value={newLoc.phone} onChange={e=>setNewLoc({...newLoc,phone:e.target.value})}/></div></div>
+              <div className="kf-row"><div className="kf-form-group"><label>Address</label><input value={newLoc.address} onChange={e=>setNewLoc({...newLoc,address:e.target.value})}/></div><div className="kf-form-group"><label>Email</label><input value={newLoc.email} onChange={e=>setNewLoc({...newLoc,email:e.target.value})}/></div></div>
+              <div className="kf-row"><div className="kf-form-group"><label>Labor Rate Override</label><input type="number" placeholder={`Default: $${settings.laborRate}`} value={newLoc.laborRate} onChange={e=>setNewLoc({...newLoc,laborRate:e.target.value})}/></div><div className="kf-form-group"><label>Tax Rate Override</label><input type="number" placeholder={`Default: ${settings.taxRate}%`} value={newLoc.taxRate} onChange={e=>setNewLoc({...newLoc,taxRate:e.target.value})}/></div></div>
               <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setShowAddLoc(false)}>Cancel</button><button className="kf-btn primary" onClick={addLoc}><Save size={16}/>Add</button></div>
             </div>
           )}
-
-          <div className="kf-loc-list">
-            {locations.map(loc => (
-              <div key={loc.id} className="kf-loc-row">
-                {editingLoc?.id === loc.id ? (
-                  <div className="kf-loc-edit">
-                    <div className="kf-row">
-                      <div className="kf-form-group"><label>Name *</label><input value={editingLoc.name} onChange={e=>setEditingLoc({...editingLoc,name:e.target.value})}/></div>
-                      <div className="kf-form-group"><label>Phone</label><input value={editingLoc.phone||''} onChange={e=>setEditingLoc({...editingLoc,phone:e.target.value})}/></div>
-                    </div>
-                    <div className="kf-row">
-                      <div className="kf-form-group"><label>Address</label><input value={editingLoc.address||''} onChange={e=>setEditingLoc({...editingLoc,address:e.target.value})}/></div>
-                      <div className="kf-form-group"><label>Email</label><input value={editingLoc.email||''} onChange={e=>setEditingLoc({...editingLoc,email:e.target.value})}/></div>
-                    </div>
-                    <div className="kf-row">
-                      <div className="kf-form-group"><label>Labor Rate Override</label><input type="number" placeholder={`Global: $${settings.laborRate}`} value={editingLoc.laborRate ?? ''} onChange={e=>setEditingLoc({...editingLoc,laborRate:e.target.value})}/></div>
-                      <div className="kf-form-group"><label>Tax Rate Override</label><input type="number" placeholder={`Global: ${settings.taxRate}%`} value={editingLoc.taxRate ?? ''} onChange={e=>setEditingLoc({...editingLoc,taxRate:e.target.value})}/></div>
-                    </div>
-                    <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setEditingLoc(null)}>Cancel</button><button className="kf-btn primary" onClick={saveEditLoc}><Save size={16}/>Save</button></div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="kf-loc-icon"><MapPin size={20}/></div>
-                    <div className="kf-loc-info">
-                      <div className="kf-name">{loc.name}</div>
-                      <div className="kf-sub">
-                        {loc.address && <span>{loc.address}</span>}
-                        {loc.phone && <span> · {loc.phone}</span>}
-                        {(loc.laborRate != null || loc.taxRate != null) && (
-                          <span className="kf-loc-overrides">
-                            {loc.laborRate != null && ` · Labor: $${loc.laborRate}/hr`}
-                            {loc.taxRate != null && ` · Tax: ${loc.taxRate}%`}
-                          </span>
-                        )}
-                        {loc.laborRate == null && loc.taxRate == null && <span className="kf-loc-overrides"> · Using global rates</span>}
-                      </div>
-                    </div>
-                    <div className="kf-loc-actions">
-                      <span className="kf-sub">{users.filter(u=>u.locationId===loc.id).length} users</span>
-                      <button className="kf-icon-btn" onClick={()=>setEditingLoc({...loc,laborRate:loc.laborRate??'',taxRate:loc.taxRate??''})}><Edit2 size={15}/></button>
-                      {locations.length > 1 && <button className="kf-icon-btn danger" onClick={()=>deleteLoc(loc.id)}><Trash2 size={15}/></button>}
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
+          <div className="kf-loc-list">{locations.map(loc=>(
+            <div key={loc.id} className="kf-loc-row">
+              {editingLoc?.id===loc.id?(
+                <div className="kf-loc-edit" style={{width:'100%'}}>
+                  <div className="kf-row"><div className="kf-form-group"><label>Name *</label><input value={editingLoc.name} onChange={e=>setEditingLoc({...editingLoc,name:e.target.value})}/></div><div className="kf-form-group"><label>Phone</label><input value={editingLoc.phone||''} onChange={e=>setEditingLoc({...editingLoc,phone:e.target.value})}/></div></div>
+                  <div className="kf-row"><div className="kf-form-group"><label>Address</label><input value={editingLoc.address||''} onChange={e=>setEditingLoc({...editingLoc,address:e.target.value})}/></div><div className="kf-form-group"><label>Email</label><input value={editingLoc.email||''} onChange={e=>setEditingLoc({...editingLoc,email:e.target.value})}/></div></div>
+                  <div className="kf-row"><div className="kf-form-group"><label>Labor Rate Override</label><input type="number" placeholder={`Global: $${settings.laborRate}`} value={editingLoc.laborRate??''} onChange={e=>setEditingLoc({...editingLoc,laborRate:e.target.value})}/></div><div className="kf-form-group"><label>Tax Rate Override</label><input type="number" placeholder={`Global: ${settings.taxRate}%`} value={editingLoc.taxRate??''} onChange={e=>setEditingLoc({...editingLoc,taxRate:e.target.value})}/></div></div>
+                  <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setEditingLoc(null)}>Cancel</button><button className="kf-btn primary" onClick={saveEditLoc}><Save size={16}/>Save</button></div>
+                </div>
+              ):(
+                <><div className="kf-loc-icon"><MapPin size={20}/></div>
+                <div className="kf-loc-info"><div className="kf-name">{loc.name}</div>
+                  <div className="kf-sub">{loc.address&&<span>{loc.address}</span>}{loc.phone&&<span> · {loc.phone}</span>}{(loc.laborRate!=null||loc.taxRate!=null)?<span className="kf-loc-overrides">{loc.laborRate!=null&&` · Labor: $${loc.laborRate}/hr`}{loc.taxRate!=null&&` · Tax: ${loc.taxRate}%`}</span>:<span className="kf-loc-overrides"> · Using global rates</span>}</div>
+                </div>
+                <div className="kf-loc-actions"><span className="kf-sub">{users.filter(u=>u.locationId===loc.id).length} users</span><button className="kf-icon-btn" onClick={()=>setEditingLoc({...loc,laborRate:loc.laborRate??'',taxRate:loc.taxRate??''})}><Edit2 size={15}/></button>{locations.length>1&&<button className="kf-icon-btn danger" onClick={()=>deleteLoc(loc.id)}><Trash2 size={15}/></button>}</div></>
+              )}
+            </div>
+          ))}</div>
         </div>
       )}
 
-      {tab === 'users' && (
+      {tab==='users'&&(
         <div className="kf-card wide">
-          <div className="kf-section-header">
-            <h3><Users size={20}/> Users</h3>
-            {canAddUser && <button className="kf-btn primary sm" onClick={() => setShowAddUser(true)}><Plus size={14}/>Add User</button>}
-          </div>
-
-          {showAddUser && (
+          <div className="kf-section-header"><h3><Users size={20}/> Users</h3><button className="kf-btn primary sm" onClick={()=>setShowAddUser(true)}><Plus size={14}/>Add User</button></div>
+          {showAddUser&&(
             <div className="kf-add-user-form">
+              <div className="kf-row"><div className="kf-form-group"><label>Name *</label><input value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})}/></div><div className="kf-form-group"><label>PIN *</label><input type="password" maxLength={6} value={newUser.pin} onChange={e=>setNewUser({...newUser,pin:e.target.value})}/></div></div>
               <div className="kf-row">
-                <div className="kf-form-group"><label>Name *</label><input value={newUser.name} onChange={e=>setNewUser({...newUser,name:e.target.value})}/></div>
-                <div className="kf-form-group"><label>PIN *</label><input type="password" maxLength={6} value={newUser.pin} onChange={e=>setNewUser({...newUser,pin:e.target.value})}/></div>
-              </div>
-              <div className="kf-row">
-                <div className="kf-form-group"><label>Role</label>
-                  <select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})}>
-                    {ROLES.filter(r => isAdmin || r.id === 'tech').map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
-                  </select>
-                </div>
-                <div className="kf-form-group"><label>Location</label>
-                  <select value={newUser.locationId} onChange={e=>setNewUser({...newUser,locationId:e.target.value})}>
-                    {(isAdmin ? locations : locations.filter(l=>l.id===currentUser.locationId)).map(l=><option key={l.id} value={l.id}>{l.name}</option>)}
-                  </select>
-                </div>
+                <div className="kf-form-group"><label>Role</label><select value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})}>{availableRoles.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select></div>
+                <div className="kf-form-group"><label>Location</label><select value={newUser.locationId} onChange={e=>setNewUser({...newUser,locationId:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></div>
               </div>
               <div className="kf-form-group"><label>Email</label><input value={newUser.email} onChange={e=>setNewUser({...newUser,email:e.target.value})}/></div>
               <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setShowAddUser(false)}>Cancel</button><button className="kf-btn primary" onClick={addUser}><Save size={16}/>Add</button></div>
             </div>
           )}
-
-          <div className="kf-users-list">
-            {visibleUsers.map(u => {
-              const userLoc = locations.find(l => l.id === u.locationId);
-              const canEdit = isAdmin || (isManager && u.role === 'tech' && u.locationId === currentUser.locationId);
-              return (
-                <div key={u.id} className="kf-user-row">
-                  {editingUser?.id === u.id ? (
-                    <div className="kf-user-edit" style={{width:'100%'}}>
-                      <div className="kf-row">
-                        <div className="kf-form-group"><label>Name *</label><input value={editingUser.name} onChange={e=>setEditingUser({...editingUser,name:e.target.value})}/></div>
-                        <div className="kf-form-group"><label>PIN *</label><input type="password" maxLength={6} value={editingUser.pin} onChange={e=>setEditingUser({...editingUser,pin:e.target.value})}/></div>
-                      </div>
-                      <div className="kf-row">
-                        <div className="kf-form-group"><label>Role</label>
-                          <select value={editingUser.role} onChange={e=>setEditingUser({...editingUser,role:e.target.value})}>
-                            {ROLES.filter(r => isAdmin || r.id === 'tech').map(r=><option key={r.id} value={r.id}>{r.label}</option>)}
-                          </select>
-                        </div>
-                        <div className="kf-form-group"><label>Location</label>
-                          <select value={editingUser.locationId||''} onChange={e=>setEditingUser({...editingUser,locationId:e.target.value})}>
-                            {(isAdmin ? locations : locations.filter(l=>l.id===currentUser.locationId)).map(l=><option key={l.id} value={l.id}>{l.name}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                      <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setEditingUser(null)}>Cancel</button><button className="kf-btn primary" onClick={saveEditUser}><Save size={16}/>Save</button></div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="kf-avatar">{u.name.charAt(0)}</div>
-                      <div className="kf-user-info">
-                        <div className="kf-name">{u.name} {u.id === currentUser.id && <span className="kf-badge">You</span>}</div>
-                        <div className="kf-sub kf-user-meta">
-                          <span className={`kf-role-tag ${u.role}`}>{roleIcon(u.role)}{u.role}</span>
-                          {userLoc && <span className="kf-loc-tag"><MapPin size={11}/>{userLoc.name}</span>}
-                        </div>
-                      </div>
-                      <div className="kf-user-actions">
-                        {canEdit && <button className="kf-icon-btn" onClick={()=>setEditingUser({...u})}><Edit2 size={15}/></button>}
-                        {canEdit && u.id !== currentUser.id && <button className="kf-icon-btn danger" onClick={()=>deleteUser(u.id)}><Trash2 size={15}/></button>}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <div className="kf-users-list">{visibleUsers.map(u=>{
+            const userLoc=locations.find(l=>l.id===u.locationId);
+            const canEdit=isMaster||(isAdmin&&u.role==='technician'&&u.locationId===currentUser.locationId);
+            return(
+              <div key={u.id} className="kf-user-row">
+                {editingUser?.id===u.id?(
+                  <div className="kf-user-edit" style={{width:'100%'}}>
+                    <div className="kf-row"><div className="kf-form-group"><label>Name *</label><input value={editingUser.name} onChange={e=>setEditingUser({...editingUser,name:e.target.value})}/></div><div className="kf-form-group"><label>PIN *</label><input type="password" maxLength={6} value={editingUser.pin} onChange={e=>setEditingUser({...editingUser,pin:e.target.value})}/></div></div>
+                    <div className="kf-row"><div className="kf-form-group"><label>Role</label><select value={editingUser.role} onChange={e=>setEditingUser({...editingUser,role:e.target.value})}>{availableRoles.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}</select></div><div className="kf-form-group"><label>Location</label><select value={editingUser.locationId||''} onChange={e=>setEditingUser({...editingUser,locationId:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></div></div>
+                    <div className="kf-row"><button className="kf-btn secondary" onClick={()=>setEditingUser(null)}>Cancel</button><button className="kf-btn primary" onClick={saveEditUser}><Save size={16}/>Save</button></div>
+                  </div>
+                ):(
+                  <><div className="kf-avatar">{u.name.charAt(0)}</div>
+                  <div className="kf-user-info"><div className="kf-name">{u.name}{u.id===currentUser.id&&<span className="kf-badge">You</span>}</div>
+                    <div className="kf-sub kf-user-meta"><span className={`kf-role-tag ${u.role}`}>{roleIcon(u.role)}{u.role.replace('_',' ')}</span>{userLoc&&<span className="kf-loc-tag"><MapPin size={11}/>{userLoc.name}</span>}</div>
+                  </div>
+                  <div className="kf-user-actions">{canEdit&&<button className="kf-icon-btn" onClick={()=>setEditingUser({...u})}><Edit2 size={15}/></button>}{canEdit&&u.id!==currentUser.id&&u.role!=='master_admin'&&<button className="kf-icon-btn danger" onClick={()=>deleteUser(u.id)}><Trash2 size={15}/></button>}</div></>
+                )}
+              </div>
+            );
+          })}</div>
         </div>
       )}
 
-      {tab === 'data' && isAdmin && (
-        <div className="kf-card">
-          <h3><Trash2 size={20}/> Data</h3>
-          <p className="kf-sub">Clear all data. This cannot be undone.</p>
-          <button className="kf-btn secondary" style={{marginTop:12}} onClick={()=>{if(confirm('Delete ALL data?')){localStorage.clear();location.reload();}}}><Trash2 size={16}/>Clear All Data</button>
+      {tab==='backup'&&isMaster&&(
+        <div className="kf-settings-grid">
+          <div className="kf-card">
+            <h3><Download size={20}/> Backup</h3>
+            <p className="kf-sub" style={{marginBottom:16}}>Download your company's complete database as a <code>.db</code> file. Keep it safe — you can restore from it later.</p>
+            <button className="kf-btn primary" onClick={handleBackup}><Download size={16}/>Download Backup</button>
+          </div>
+          <div className="kf-card">
+            <h3><RefreshCw size={20}/> Restore</h3>
+            <p className="kf-sub" style={{marginBottom:16}}>Upload a previously downloaded <code>.db</code> file to restore your company data. <strong>This will overwrite all current data.</strong></p>
+            <label className="kf-btn secondary" style={{cursor:'pointer',display:'inline-flex',alignItems:'center',gap:8}}>
+              {restoring?<Loader2 size={16} className="spin"/>:<RefreshCw size={16}/>}Choose Backup File
+              <input ref={restoreRef} type="file" accept=".db" style={{display:'none'}} onChange={handleRestore}/>
+            </label>
+          </div>
         </div>
       )}
     </div>
