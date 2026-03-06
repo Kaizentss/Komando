@@ -943,7 +943,7 @@ function CannedItemsView({cannedItems, setCannedItems, settings, notify}) {
   const [expandedCats, setExpandedCats] = useState({});
   const [newItem, setNewItem] = useState({
     name: '', description: '', type: 'labor', categoryId: '',
-    hours: 1, rate: settings.laborRate, quantity: 1, cost: 0, price: 0, notes: ''
+    hours: 1, rate: 0, quantity: 1, cost: 0, price: 0, notes: ''
   });
 
   const categories = cannedItems.categories || [];
@@ -1917,7 +1917,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
 
   const addItem = (type) => {
     const newItem = type === 'labor' 
-      ? {id: `i${Date.now()}`, type: 'labor', description: '', hours: 1, rate: settings.laborRate, technicianId: ''}
+      ? {id: `i${Date.now()}`, type: 'labor', description: '', hours: 1, rate: 0, technicianId: ''}
       : type === 'part'
       ? {id: `i${Date.now()}`, type: 'part', description: '', quantity: 1, cost: 0, technicianId: ''}
       : {id: `i${Date.now()}`, type: 'fee', description: '', price: 0};
@@ -2295,7 +2295,15 @@ function LineItem({item, users, settings, canEdit, onUpdate, onDelete}) {
     <div className="kf-line-item edit">
       <div className="kf-li-type"><TypeIcon size={16}/></div>
       <input className="kf-li-desc" value={item.description || ''} onChange={e => onUpdate(item.id, {description: e.target.value})} placeholder="Description..."/>
-      {item.type === 'labor' && <div className="kf-li-fields"><div className="kf-field"><label>Hrs</label><input type="number" step="0.25" value={item.hours || ''} onChange={e => onUpdate(item.id, {hours: +e.target.value || 0})}/></div><div className="kf-field"><label>Rate</label><input type="number" value={item.rate || settings.laborRate} onChange={e => onUpdate(item.id, {rate: +e.target.value})}/></div></div>}
+      {item.type === 'labor' && (
+        <div className="kf-li-fields">
+          <div className="kf-field"><label>Hrs</label><input type="number" step="0.25" value={item.hours || ''} onChange={e => onUpdate(item.id, {hours: +e.target.value || 0})}/></div>
+          <div className="kf-field">
+            <label>Rate {item.rate > 0 && item.rate !== settings.laborRate && <button className="kf-rate-reset" title="Reset to location rate" onClick={() => onUpdate(item.id, {rate: 0})}>↺ {settings.laborRate}</button>}</label>
+            <input type="number" placeholder={settings.laborRate} value={item.rate || ''} onChange={e => onUpdate(item.id, {rate: +e.target.value || 0})}/>
+          </div>
+        </div>
+      )}
       {item.type === 'part' && <div className="kf-li-fields"><div className="kf-field"><label>Qty</label><input type="number" min="1" value={item.quantity || 1} onChange={e => onUpdate(item.id, {quantity: +e.target.value || 1})}/></div><div className="kf-field"><label>Cost</label><input type="number" step="0.01" value={item.cost || ''} onChange={e => onUpdate(item.id, {cost: +e.target.value || 0})}/></div></div>}
       {item.type === 'fee' && <div className="kf-li-fields"><div className="kf-field"><label>Amt</label><input type="number" step="0.01" value={item.price || ''} onChange={e => onUpdate(item.id, {price: +e.target.value || 0})}/></div></div>}
       <select className="kf-li-tech" value={item.technicianId || ''} onChange={e => onUpdate(item.id, {technicianId: e.target.value})}><option value="">Assign...</option>{users.filter(u => u.role === 'tech' || u.role === 'admin').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
