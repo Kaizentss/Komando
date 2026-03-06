@@ -183,7 +183,7 @@ async def create_company(body: CreateCompanyRequest):
         raise HTTPException(409, "Company ID already exists")
     master = {
         "id": f"u_{cid}_master", "name": body.masterAdminName,
-        "email": body.masterAdminEmail, "pin": body.masterAdminPin,
+        "email": body.masterAdminEmail, "password": body.masterAdminPin,
         "role": "master_admin", "locationId": "loc1", "companyId": cid
     }
     record = {"id": cid, "name": body.companyName, "suspended": False,
@@ -256,8 +256,37 @@ async def superadmin_view_company(cid: str):
     return {r['key']: json.loads(r['value']) for r in rows}
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  PUBLIC COMPANY LIST (for login screen)
+#  COMPANY USER AUTH  /api/auth/login
 # ═════════════════════════════════════════════════════════════════════════════
+class UserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/api/auth/login")
+async def user_login(body: UserLoginRequest):
+    """Find a user by email+password across all active companies."""
+    reg = load_registry()
+    for company in reg.get("companies", []):
+        if company.get("suspended"):
+            continue
+        cid = company["id"]
+        db_path = company_db_path(cid)
+        if not os.path.exists(db_path):
+            continue
+        conn = get_company_db(cid)
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM store WHERE key='users'")
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            continue
+        users = json.loads(row["value"])
+        for u in users:
+            if u.get("email", "").lower() == body.email.lower() and u.get("password") == body.password:
+                return {"ok": True, "user": u, "company": {"id": company["id"], "name": company["name"]}}
+    raise HTTPException(status_code=401, detail="Invalid email or password")
+
+
 @app.get("/api/companies")
 async def public_companies():
     reg = load_registry()
