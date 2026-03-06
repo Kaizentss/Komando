@@ -818,21 +818,14 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       </div>
 
       {tab==='general'&&(
-        <div className="kf-settings-grid">
-          <div className="kf-card">
-            <h3><DollarSign size={20}/> Default Rates</h3>
-            <p className="kf-sub" style={{marginBottom:12}}>Used when a location has no override set.</p>
-            <div className="kf-form-group"><label>Labor Rate ($/hr)</label><input type="text" inputMode="decimal" value={localSettings.laborRate} onChange={e=>setLocalSettings({...localSettings,laborRate:parseFloat(e.target.value)||0})}/></div>
-            <div className="kf-form-group"><label>Tax Rate (%)</label><input type="text" inputMode="decimal" value={localSettings.taxRate} onChange={e=>setLocalSettings({...localSettings,taxRate:parseFloat(e.target.value)||0})}/></div>
-            <button className="kf-btn primary" onClick={saveSettings}><Save size={16}/>Save</button>
-          </div>
-          <div className="kf-card">
-            <h3><Building2 size={20}/> Business Info</h3>
+        <div className="kf-card wide">
+          <h3><Building2 size={20}/> Business Info</h3>
+          <div className="kf-settings-grid" style={{marginTop:16}}>
             <div className="kf-form-group"><label>Shop Name</label><input value={localSettings.shopName} onChange={e=>setLocalSettings({...localSettings,shopName:e.target.value})}/></div>
             <div className="kf-form-group"><label>Phone</label><input value={localSettings.phone} onChange={e=>setLocalSettings({...localSettings,phone:e.target.value})}/></div>
             <div className="kf-form-group"><label>Email</label><input value={localSettings.email||''} onChange={e=>setLocalSettings({...localSettings,email:e.target.value})}/></div>
-            <button className="kf-btn primary" onClick={saveSettings}><Save size={16}/>Save</button>
           </div>
+          <button className="kf-btn primary" style={{marginTop:8}} onClick={saveSettings}><Save size={16}/>Save</button>
         </div>
       )}
 
