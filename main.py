@@ -171,8 +171,6 @@ async def delete_superadmin_account(admin_id: str):
     return {"ok": True}
 
 
-    return load_registry()["companies"]
-
 @app.get("/api/superadmin/companies")
 async def list_companies():
     return load_registry().get("companies", [])
