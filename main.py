@@ -55,8 +55,11 @@ def init_db():
         'vehicles': [],
         'estimates': [],
         'invoices': [],
+        'locations': [
+            {'id': 'loc1', 'name': 'Main Location', 'address': '', 'phone': '', 'email': '', 'laborRate': None, 'taxRate': None}
+        ],
         'users': [
-            {'id': 'u1', 'name': 'Admin', 'email': 'admin@kaizen.com', 'pin': '1234', 'role': 'admin'}
+            {'id': 'u1', 'name': 'Admin', 'email': 'admin@kaizen.com', 'pin': '1234', 'role': 'admin', 'locationId': 'loc1'}
         ],
         'settings': {
             'laborRate': 220.50,
