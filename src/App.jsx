@@ -90,31 +90,48 @@ function loadData(companyId, key, def) {
 
 async function saveDataToAPI(companyId, key, data) {
   try {
-    localStorage.setItem(lsKey(companyId, key), JSON.stringify(data));
-    await fetch(`${API_URL}/api/company/${companyId}/data/${key}`, {
+    const res = await fetch(`${API_URL}/api/company/${companyId}/data/${key}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ value: data })
     });
-  } catch (e) { console.log('API save failed:', e); }
+    if (!res.ok) console.warn(`API save failed for ${key}:`, res.status);
+  } catch (e) { console.warn('API save error:', e); }
 }
 
 function saveData(companyId, key, data) {
   try {
     localStorage.setItem(lsKey(companyId, key), JSON.stringify(data));
     saveDataToAPI(companyId, key, data);
-  } catch {}
+  } catch (e) { console.warn('saveData error:', e); }
 }
 
 async function loadAllFromAPI(companyId) {
   try {
     const res = await fetch(`${API_URL}/api/company/${companyId}/data`);
     if (res.ok) {
-      const data = await res.json();
-      for (const [key, value] of Object.entries(data))
-        localStorage.setItem(lsKey(companyId, key), JSON.stringify(value));
-      return data;
+      const apiData = await res.json();
+      // Merge: API is authoritative for keys it returns with data.
+      // For each key, pick whichever has more data (protects against a brand-new
+      // server DB overwriting a richer localStorage on first login after deploy).
+      const ARRAY_KEYS = ['customers','vehicles','estimates','invoices','users','locations'];
+      for (const [key, apiVal] of Object.entries(apiData)) {
+        let lsVal;
+        try { lsVal = JSON.parse(localStorage.getItem(lsKey(companyId, key))); } catch { lsVal = null; }
+        let winner = apiVal;
+        if (ARRAY_KEYS.includes(key)) {
+          const apiLen = Array.isArray(apiVal) ? apiVal.length : 0;
+          const lsLen  = Array.isArray(lsVal)  ? lsVal.length  : 0;
+          if (lsLen > apiLen) {
+            // localStorage has more data — push it up to the API then keep it
+            winner = lsVal;
+            saveDataToAPI(companyId, key, lsVal);
+          }
+        }
+        localStorage.setItem(lsKey(companyId, key), JSON.stringify(winner));
+      }
+      return apiData;
     }
-  } catch (e) { console.log('API load failed, using localStorage:', e); }
+  } catch (e) { console.warn('API load failed, using localStorage:', e); }
   return null;
 }
 
@@ -457,33 +474,45 @@ export default function App() {
   }, []);
 
   // Load company data when entering app screen
+  // We use a ref-based "ready" flag instead of isLoading state to avoid race conditions
+  // where React fires save effects before all state setters have settled.
+  const dataReadyRef = React.useRef(false);
+
   useEffect(() => {
     if (screen === 'app' && cid) {
+      dataReadyRef.current = false;
       setIsLoading(true);
       loadAllFromAPI(cid).then(data => {
-        const d = data || {};
-        setCustomers(d.customers || loadData(cid,'customers',[]));
-        setVehicles(d.vehicles   || loadData(cid,'vehicles',[]));
-        setEstimates(d.estimates || loadData(cid,'estimates',[]));
-        setInvoices(d.invoices   || loadData(cid,'invoices',[]));
-        setUsers(d.users         || loadData(cid,'users',[]));
-        setLocations(d.locations || loadData(cid,'locations',[{id:'loc1',name:'Main Location',address:'',phone:'',email:'',laborRate:null,taxRate:null}]));
-        setSettings(d.settings   || loadData(cid,'settings',DEFAULT_SETTINGS));
-        setCannedItems(d.cannedItems || loadData(cid,'cannedItems',{categories:[],items:[]}));
-        setIsLoading(false);
+        // loadAllFromAPI already wrote non-empty API values to localStorage.
+        // Now read everything from localStorage (single source of truth after sync).
+        const ls = (key, def) => loadData(cid, key, def);
+        setCustomers(  ls('customers', []));
+        setVehicles(   ls('vehicles',  []));
+        setEstimates(  ls('estimates', []));
+        setInvoices(   ls('invoices',  []));
+        setUsers(      ls('users',     []));
+        setLocations(  ls('locations', [{id:'loc1',name:'Main Location',address:'',phone:'',email:'',laborRate:null,taxRate:null}]));
+        setSettings(   ls('settings',  DEFAULT_SETTINGS));
+        setCannedItems(ls('cannedItems',{categories:[],items:[]}));
+        // Use setTimeout to ensure all state setters above have been batched
+        // before we allow save effects to fire
+        setTimeout(() => {
+          dataReadyRef.current = true;
+          setIsLoading(false);
+        }, 0);
       });
     }
   }, [screen, cid]);
 
-  // Persist data changes
-  useEffect(() => { if (!isLoading && cid) saveData(cid,'customers',customers); }, [customers]);
-  useEffect(() => { if (!isLoading && cid) saveData(cid,'vehicles',vehicles); }, [vehicles]);
-  useEffect(() => { if (!isLoading && cid) saveData(cid,'estimates',estimates); }, [estimates]);
-  useEffect(() => { if (!isLoading && cid) saveData(cid,'invoices',invoices); }, [invoices]);
-  useEffect(() => { if (!isLoading && cid) saveData(cid,'users',users); }, [users]);
-  useEffect(() => { if (!isLoading && cid) saveData(cid,'locations',locations); }, [locations]);
-  useEffect(() => { if (!isLoading && cid) saveData(cid,'settings',settings); }, [settings]);
-  useEffect(() => { if (!isLoading && cid) saveData(cid,'cannedItems',cannedItems); }, [cannedItems]);
+  // Persist data changes — only fires after data is fully loaded
+  useEffect(() => { if (dataReadyRef.current && cid) saveData(cid,'customers',customers); }, [customers]);
+  useEffect(() => { if (dataReadyRef.current && cid) saveData(cid,'vehicles',vehicles); }, [vehicles]);
+  useEffect(() => { if (dataReadyRef.current && cid) saveData(cid,'estimates',estimates); }, [estimates]);
+  useEffect(() => { if (dataReadyRef.current && cid) saveData(cid,'invoices',invoices); }, [invoices]);
+  useEffect(() => { if (dataReadyRef.current && cid) saveData(cid,'users',users); }, [users]);
+  useEffect(() => { if (dataReadyRef.current && cid) saveData(cid,'locations',locations); }, [locations]);
+  useEffect(() => { if (dataReadyRef.current && cid) saveData(cid,'settings',settings); }, [settings]);
+  useEffect(() => { if (dataReadyRef.current && cid) saveData(cid,'cannedItems',cannedItems); }, [cannedItems]);
 
   // ── Auth handlers ─────────────────────────────────────────────────────────
 
