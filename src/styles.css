@@ -1525,3 +1525,94 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
   font-style: italic;
   margin-top: 3px;
 }
+
+/* ===== Import Tab ===== */
+.kf-import-formats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.kf-import-format-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+.kf-import-format-icon {
+  width: 36px;
+  height: 36px;
+  background: rgba(230,57,70,0.15);
+  color: var(--primary);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.kf-import-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border: 2px dashed rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 36px 24px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--text-dim);
+  transition: border-color 0.2s, background 0.2s;
+  margin-bottom: 24px;
+}
+.kf-import-dropzone:hover {
+  border-color: var(--primary);
+  background: rgba(230,57,70,0.05);
+  color: var(--text);
+}
+.kf-import-dropzone svg { opacity: 0.5; }
+.kf-import-preview {}
+.kf-import-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.kf-import-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 400px;
+}
+.kf-import-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.kf-import-table th {
+  background: rgba(255,255,255,0.05);
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+}
+.kf-import-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kf-import-table tr.dupe td { opacity: 0.45; }
+.kf-import-table tr:last-child td { border-bottom: none; }
+.kf-import-table tr:hover td { background: rgba(255,255,255,0.02); }
