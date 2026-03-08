@@ -962,12 +962,16 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       const workbook = XLSX.read(buf, {type:'array'});
       const ws = workbook.Sheets[workbook.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
-      // Detect format by first real header row
-      const firstHeaders = (raw.find(r => r && r.some(v => v)) || []).join('|').toLowerCase();
+      // Detect format by scanning all rows for known header signatures
+      const allText = raw.map(r => (r||[]).join('|')).join('\n').toLowerCase();
       let result;
-      if (firstHeaders.includes('company name')) {
+      if (raw.some(r => r && r[0] === 'Company Name*')) {
         result = parseShopmonkeyFleet(workbook);
-      } else if (firstHeaders.includes('order #') || raw.some(r => r && r[0] === 'Order #*')) {
+      } else if (raw.some(r => r && r[0] === 'Order #*')) {
+        result = parseShopmonkeyOrderLineItems(workbook);
+      } else if (allText.includes('company name')) {
+        result = parseShopmonkeyFleet(workbook);
+      } else if (allText.includes('order #')) {
         result = parseShopmonkeyOrderLineItems(workbook);
       } else {
         result = {error: 'Unrecognized format. Supported: Shopmonkey Fleet export or Order Line Items export.'};
