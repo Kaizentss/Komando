@@ -1290,6 +1290,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
                     </tbody>
                   </table>
                 )}
+              </div>
             </div>
           )}
         </div>
