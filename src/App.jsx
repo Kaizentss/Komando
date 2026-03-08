@@ -735,7 +735,7 @@ export default function App() {
           {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)} onDelete={i=>{if(confirm(`Delete ${i.number}? This cannot be undone.`)){setInvoices(invoices.filter(x=>x.id!==i.id));notify('Invoice deleted');}}}/>}
           {view==='canned'     && <CannedItemsView cannedItems={cannedItems} setCannedItems={setCannedItems} settings={settings} notify={notify}/>}
           {view==='messages'   && <MessagesView/>}
-          {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} customers={customers} setCustomers={setCustomers} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
+          {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
         </div>
       </main>
 
@@ -839,7 +839,7 @@ function MessagesView() {
   return <div className="kf-empty" style={{height:400}}><MessageSquare size={60}/><p>Messaging coming soon</p></div>;
 }
 
-function SettingsView({settings,setSettings,users,setUsers,locations,setLocations,customers,setCustomers,currentUser,company,notify}) {
+function SettingsView({settings,setSettings,users,setUsers,locations,setLocations,customers,setCustomers,invoices,setInvoices,currentUser,company,notify}) {
   const [localSettings,setLocalSettings]=useState(settings);
   const [tab,setTab]=useState('general');
   const [newUser,setNewUser]=useState({name:'',email:'',password:'',role:'technician',locationId:locations[0]?.id||''});
@@ -859,12 +859,10 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
   const importRef = useRef(null);
 
   const parseShopmonkeyFleet = (workbook) => {
-    // Find the sheet
     const ws = workbook.Sheets[workbook.SheetNames[0]];
     const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
-    // Row 3 (index 2) is the header row in SM fleet exports
     const headerRow = raw.findIndex(r => r && r[0] === 'Company Name*');
-    if (headerRow === -1) return {error: 'Could not find Shopmonkey fleet headers. Make sure this is a fleet export.'};
+    if (headerRow === -1) return {error: 'Could not find Shopmonkey fleet headers.'};
     const headers = raw[headerRow];
     const dataRows = raw.slice(headerRow + 1).filter(r => r && r[0]);
     const idx = (name) => headers.findIndex(h => h && h.toString().startsWith(name));
@@ -872,7 +870,6 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
           iAddr1=idx('Address 1'), iAddr2=idx('Address 2'), iCity=idx('City'), iState=idx('State'),
           iZip=idx('Zip'), iNote=idx('Note'), iTaxExempt=idx('Tax Exempt'), iCreated=idx('Date Created');
     const rows = dataRows.map((r, i) => ({
-      _row: headerRow + 2 + i,
       companyName: r[iName]?.toString().trim() || '',
       phones: [r[iPhone]?.toString().trim()].filter(Boolean),
       phone: r[iPhone]?.toString().trim() || '',
@@ -889,6 +886,71 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
     return {type:'fleet', rows, errors:[]};
   };
 
+  const parseShopmonkeyOrderLineItems = (workbook) => {
+    const ws = workbook.Sheets[workbook.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+    const headerRow = raw.findIndex(r => r && r[0] === 'Order #*');
+    if (headerRow === -1) return {error: 'Could not find Shopmonkey order line items headers.'};
+    const headers = raw[headerRow];
+    const idx = (name) => headers.findIndex(h => h && h.toString().startsWith(name));
+    const iOrder=idx('Order #'), iDate=idx('Invoiced Date'), iVehicle=idx('Vehicle'),
+          iType=idx('Type'), iDesc=idx('Part Description'), iTech=idx('Technician'),
+          iNote=idx('Note'), iHours=idx('Hours'), iRate=idx('Rate'), iCost=idx('Cost'),
+          iPrice=idx('Price'), iQty=idx('Quantity'), iSubtotal=idx('Subtotal'), iStatus=idx('Status');
+    const dataRows = raw.slice(headerRow + 1).filter(r => r && r[iOrder]);
+
+    // Group by order number
+    const orderMap = new Map();
+    for (const r of dataRows) {
+      const orderNum = r[iOrder]?.toString().trim();
+      if (!orderNum) continue;
+      if (!orderMap.has(orderNum)) {
+        const rawDate = r[iDate]?.toString() || '';
+        const dateStr = rawDate ? rawDate.split('T')[0] : '';
+        orderMap.set(orderNum, {
+          orderNum,
+          date: dateStr,
+          vehicleStr: r[iVehicle]?.toString().trim() || '',
+          items: [],
+          total: 0,
+        });
+      }
+      const order = orderMap.get(orderNum);
+      const type = (r[iType]||'').toString().toLowerCase();
+      const subtotal = parseFloat(r[iSubtotal]) || 0;
+      order.total += subtotal;
+      const item = {
+        id: `i${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        description: r[iDesc]?.toString().trim() || 'Service',
+        technicianName: r[iTech]?.toString().trim() || '',
+        customerNote: r[iNote]?.toString().trim() || '',
+      };
+      if (type === 'labor') {
+        item.type = 'labor';
+        item.hours = parseFloat(r[iHours]) || 0;
+        item.rate = parseFloat(r[iRate]) || 0;
+      } else if (type === 'part') {
+        item.type = 'part';
+        item.quantity = parseFloat(r[iQty]) || 1;
+        item.cost = parseFloat(r[iCost]) || 0;
+      } else {
+        item.type = 'fee';
+        item.price = subtotal;
+      }
+      order.items.push(item);
+    }
+
+    const rows = Array.from(orderMap.values());
+    // Parse vehicle string "2021 Jeep Grand Cherokee L Limited" → {year, make, model}
+    rows.forEach(o => {
+      const parts = o.vehicleStr.split(' ');
+      o.vehicleYear = parts[0] || '';
+      o.vehicleMake = parts[1] || '';
+      o.vehicleModel = parts.slice(2).join(' ') || '';
+    });
+    return {type:'orders', rows, errors:[]};
+  };
+
   const handleImportFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -897,16 +959,17 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
     try {
       const buf = await file.arrayBuffer();
       const workbook = XLSX.read(buf, {type:'array'});
-      // Detect type by headers
       const ws = workbook.Sheets[workbook.SheetNames[0]];
       const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
-      const headerRow = raw.find(r => r && r.some(v => v));
-      const headerStr = (headerRow||[]).join('|').toLowerCase();
+      // Detect format by first real header row
+      const firstHeaders = (raw.find(r => r && r.some(v => v)) || []).join('|').toLowerCase();
       let result;
-      if (headerStr.includes('company name')) {
+      if (firstHeaders.includes('company name')) {
         result = parseShopmonkeyFleet(workbook);
+      } else if (firstHeaders.includes('order #') || raw.some(r => r && r[0] === 'Order #*')) {
+        result = parseShopmonkeyOrderLineItems(workbook);
       } else {
-        result = {error: 'Unrecognized export format. Supported: Shopmonkey Fleet export.'};
+        result = {error: 'Unrecognized format. Supported: Shopmonkey Fleet export or Order Line Items export.'};
       }
       if (result.error) { notify(result.error, 'error'); setImportFile(null); return; }
       setImportPreview(result);
@@ -919,39 +982,66 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
   const handleDoImport = () => {
     if (!importPreview) return;
     setImporting(true);
-    const existing = customers.map(c => (c.companyName||'').toLowerCase().trim());
-    let added = 0, skipped = 0;
-    const newCustomers = [...customers];
-    for (const row of importPreview.rows) {
-      const nameLower = row.companyName.toLowerCase().trim();
-      if (existing.includes(nameLower)) { skipped++; continue; }
-      newCustomers.push({
-        id: `c${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
-        type: 'fleet',
-        companyName: row.companyName,
-        contactName: '',
-        phones: row.phones,
-        phone: row.phone,
-        emails: row.emails,
-        email: row.email,
-        address: row.address,
-        city: row.city,
-        state: row.state,
-        zip: row.zip,
-        note: row.note,
-        taxExempt: row.taxExempt,
-        discountAppliesTo: {labor:true,parts:true,fees:true},
-        totalSpent: 0,
-        createdAt: new Date().toISOString().split('T')[0],
-      });
-      existing.push(nameLower);
-      added++;
+
+    if (importPreview.type === 'fleet') {
+      const existing = customers.map(c => (c.companyName||'').toLowerCase().trim());
+      let added = 0, skipped = 0;
+      const newCustomers = [...customers];
+      for (const row of importPreview.rows) {
+        const nameLower = row.companyName.toLowerCase().trim();
+        if (existing.includes(nameLower)) { skipped++; continue; }
+        newCustomers.push({
+          id: `c${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+          type: 'fleet', companyName: row.companyName, contactName: '',
+          phones: row.phones, phone: row.phone, emails: row.emails, email: row.email,
+          address: row.address, city: row.city, state: row.state, zip: row.zip,
+          note: row.note, taxExempt: row.taxExempt,
+          discountAppliesTo: {labor:true,parts:true,fees:true},
+          totalSpent: 0, createdAt: new Date().toISOString().split('T')[0],
+        });
+        existing.push(nameLower);
+        added++;
+      }
+      setCustomers(newCustomers);
+      setImporting(false);
+      setImportPreview(null);
+      setImportFile(null);
+      notify(`Import complete: ${added} fleet customers added, ${skipped} skipped`);
+
+    } else if (importPreview.type === 'orders') {
+      // Import as historical invoices — no customer linkage (SM doesn't export customer name here)
+      const existingNums = new Set(invoices.map(i => i.number));
+      let added = 0, skipped = 0;
+      const newInvoices = [...invoices];
+      for (const order of importPreview.rows) {
+        if (existingNums.has(order.orderNum)) { skipped++; continue; }
+        newInvoices.push({
+          id: `inv_sm_${order.orderNum.replace('#','')}`,
+          number: order.orderNum,
+          status: 'paid',
+          source: 'shopmonkey',
+          customerId: null,
+          vehicleId: null,
+          vehicleStr: order.vehicleStr,
+          createdAt: order.date,
+          convertedAt: order.date,
+          items: order.items,
+          subtotal: order.total,
+          tax: 0,
+          finalTotal: order.total,
+          balance: 0,
+          payments: [{amount: order.total, method: 'imported', date: order.date}],
+          notes: `Imported from Shopmonkey. Vehicle: ${order.vehicleStr}`,
+        });
+        existingNums.add(order.orderNum);
+        added++;
+      }
+      setInvoices(newInvoices);
+      setImporting(false);
+      setImportPreview(null);
+      setImportFile(null);
+      notify(`Import complete: ${added} invoices added, ${skipped} skipped (duplicates)`);
     }
-    setCustomers(newCustomers);
-    setImporting(false);
-    setImportPreview(null);
-    setImportFile(null);
-    notify(`Import complete: ${added} added, ${skipped} skipped (duplicates)`);
   };
   const saveSettings=()=>{setSettings(localSettings);notify('Settings saved');};
 
@@ -1128,7 +1218,11 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
           <div className="kf-import-formats">
             <div className="kf-import-format-card">
               <div className="kf-import-format-icon"><Users size={20}/></div>
-              <div><strong>Fleet Customers</strong><div className="kf-sub" style={{fontSize:'0.78rem'}}>Shopmonkey → Reports → Fleet → Export</div></div>
+              <div><strong>Fleet Customers</strong><div className="kf-sub" style={{fontSize:'0.78rem'}}>Shopmonkey → Fleet → Export</div></div>
+            </div>
+            <div className="kf-import-format-card">
+              <div className="kf-import-format-icon"><FileText size={20}/></div>
+              <div><strong>Order Line Items</strong><div className="kf-sub" style={{fontSize:'0.78rem'}}>Shopmonkey → Reports → Order Line Items → Export</div></div>
             </div>
           </div>
 
@@ -1142,9 +1236,12 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
             <div className="kf-import-preview">
               <div className="kf-import-preview-header">
                 <div>
-                  <strong>{importPreview.rows.length} records ready to import</strong>
+                  <strong>{importPreview.rows.length} {importPreview.type === 'orders' ? 'invoices' : 'customers'} ready to import</strong>
                   <span className="kf-sub" style={{marginLeft:12}}>
-                    {importPreview.rows.filter(r => (customers||[]).map(c=>(c.companyName||'').toLowerCase().trim()).includes(r.companyName.toLowerCase().trim())).length} duplicates will be skipped
+                    {importPreview.type === 'fleet'
+                      ? `${importPreview.rows.filter(r => (customers||[]).some(c=>(c.companyName||'').toLowerCase().trim()===r.companyName.toLowerCase().trim())).length} duplicates will be skipped`
+                      : `${importPreview.rows.filter(r => invoices.some(i=>i.number===r.orderNum)).length} duplicates will be skipped`
+                    }
                   </span>
                 </div>
                 <button className="kf-btn primary" onClick={handleDoImport} disabled={importing}>
@@ -1153,26 +1250,45 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
                 </button>
               </div>
               <div className="kf-import-table-wrap">
-                <table className="kf-import-table">
-                  <thead><tr><th>Company Name</th><th>Phone</th><th>Email</th><th>City/State</th><th>Tax Exempt</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {importPreview.rows.slice(0,50).map((r,i) => {
-                      const isDupe = (customers||[]).some(c => (c.companyName||'').toLowerCase().trim() === r.companyName.toLowerCase().trim());
-                      return (
-                        <tr key={i} className={isDupe ? 'dupe' : ''}>
-                          <td>{r.companyName}</td>
-                          <td>{r.phone || '—'}</td>
-                          <td>{r.email || '—'}</td>
-                          <td>{[r.city,r.state].filter(Boolean).join(', ') || '—'}</td>
-                          <td>{r.taxExempt ? <span className="kf-badge sm green">Exempt</span> : '—'}</td>
-                          <td>{isDupe ? <span className="kf-sub">Skip (exists)</span> : <span style={{color:'var(--success)'}}>New</span>}</td>
-                        </tr>
-                      );
-                    })}
-                    {importPreview.rows.length > 50 && <tr><td colSpan={6} className="kf-sub" style={{textAlign:'center',padding:12}}>...and {importPreview.rows.length - 50} more</td></tr>}
-                  </tbody>
-                </table>
-              </div>
+                {importPreview.type === 'fleet' ? (
+                  <table className="kf-import-table">
+                    <thead><tr><th>Company Name</th><th>Phone</th><th>Email</th><th>City/State</th><th>Tax Exempt</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {importPreview.rows.slice(0,50).map((r,i) => {
+                        const isDupe = (customers||[]).some(c => (c.companyName||'').toLowerCase().trim() === r.companyName.toLowerCase().trim());
+                        return (
+                          <tr key={i} className={isDupe ? 'dupe' : ''}>
+                            <td>{r.companyName}</td><td>{r.phone||'—'}</td><td>{r.email||'—'}</td>
+                            <td>{[r.city,r.state].filter(Boolean).join(', ')||'—'}</td>
+                            <td>{r.taxExempt ? <span className="kf-badge sm green">Exempt</span> : '—'}</td>
+                            <td>{isDupe ? <span className="kf-sub">Skip</span> : <span style={{color:'var(--success)'}}>New</span>}</td>
+                          </tr>
+                        );
+                      })}
+                      {importPreview.rows.length > 50 && <tr><td colSpan={6} className="kf-sub" style={{textAlign:'center',padding:12}}>...and {importPreview.rows.length - 50} more</td></tr>}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="kf-import-table">
+                    <thead><tr><th>Order #</th><th>Date</th><th>Vehicle</th><th>Line Items</th><th>Total</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {importPreview.rows.slice(0,50).map((r,i) => {
+                        const isDupe = invoices.some(inv => inv.number === r.orderNum);
+                        return (
+                          <tr key={i} className={isDupe ? 'dupe' : ''}>
+                            <td>{r.orderNum}</td>
+                            <td>{r.date||'—'}</td>
+                            <td>{r.vehicleStr||'—'}</td>
+                            <td style={{textAlign:'center'}}>{r.items.length}</td>
+                            <td>${r.total.toFixed(2)}</td>
+                            <td>{isDupe ? <span className="kf-sub">Skip</span> : <span style={{color:'var(--success)'}}>New</span>}</td>
+                          </tr>
+                        );
+                      })}
+                      {importPreview.rows.length > 50 && <tr><td colSpan={6} className="kf-sub" style={{textAlign:'center',padding:12}}>...and {importPreview.rows.length - 50} more</td></tr>}
+                    </tbody>
+                  </table>
+                )}
             </div>
           )}
         </div>
