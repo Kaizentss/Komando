@@ -646,7 +646,8 @@ export default function App() {
     const docNum = doc.docNumber || parseInt(doc.number?.replace('EST-','')||'0');
     const inv = {...doc,id:doc.id,docNumber:docNum,number:`INV-${String(docNum).padStart(4,'0')}`,
       docType:'invoice',status:'unpaid',convertedAt:new Date().toISOString().split('T')[0],
-      dueAt:new Date(Date.now()+30*86400000).toISOString().split('T')[0],payments:[],balance:doc.finalTotal||doc.total||0};
+      dueAt:new Date(Date.now()+30*86400000).toISOString().split('T')[0],payments:[],balance:doc.finalTotal||doc.total||0,
+      poNumber: doc.poNumber || '', paymentTerm: doc.paymentTerm || 'Net 30'};
     setEstimates(estimates.filter(e=>e.id!==doc.id));
     setInvoices([...invoices,inv]);
     setEditingEstimate(inv);
@@ -1618,109 +1619,213 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
       `<tr class="payment"><td colspan="3">${p.date} - Payment (${p.method})</td><td style="text-align:right;color:green">-$${p.amount.toFixed(2)}</td></tr>`
     ).join('');
 
+    // Build itemsHtml grouped by description (no grouping key yet, just render as service blocks)
+    const creatorName = users.find(u => u.id === invoice.createdBy)?.name || 'Staff';
+    const custAddr = customer ? [customer.address, customer.city && customer.state ? customer.city+', '+customer.state+' '+customer.zip : (customer.city||customer.state||'')].filter(Boolean).join('<br>') : '';
+    const payTerm = invoice.paymentTerm || 'Net 30';
+    const poNum = invoice.poNumber || '';
+
+    const paymentsTableHtml = (invoice.payments || []).length > 0 ? `
+      <div class="payments-section">
+        <table class="payments-table">
+          <thead><tr><th>Date</th><th>Method</th><th style="text-align:right">Amount</th></tr></thead>
+          <tbody>
+            ${(invoice.payments||[]).map(p=>`<tr><td>${p.date}</td><td style="text-transform:capitalize">${p.method}</td><td style="text-align:right">$${p.amount.toFixed(2)}</td></tr>`).join('')}
+            <tr class="pay-total"><td colspan="2"><strong>Total Payments</strong></td><td style="text-align:right"><strong>$${(invoice.payments||[]).reduce((s,p)=>s+p.amount,0).toFixed(2)}</strong></td></tr>
+          </tbody>
+        </table>
+      </div>` : '';
+
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>INVOICE ${invoice.number}</title>
+        <title>Invoice ${invoice.number}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; padding: 40px; color: #333; max-width: 800px; margin: 0 auto; }
-          .header { display: flex; justify-content: space-between; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #E63946; }
-          .logo { font-size: 24px; font-weight: bold; color: #E63946; }
-          .doc-info { text-align: right; }
-          .doc-type { font-size: 28px; font-weight: bold; color: #333; }
-          .doc-number { font-size: 14px; color: #666; }
-          .status { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
-          .status.paid { background: #d4edda; color: #155724; }
-          .status.unpaid { background: #f8d7da; color: #721c24; }
-          .status.partial { background: #fff3cd; color: #856404; }
-          .parties { display: flex; gap: 40px; margin-bottom: 30px; }
-
-          .prepared-by { font-size: 12px; color: #666; margin-bottom: 20px; margin-top: -18px; }
+          body { font-family: Arial, sans-serif; font-size: 13px; color: #222; max-width: 820px; margin: 0 auto; padding: 36px; }
+          /* Header */
+          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 2px solid #e63946; }
+          .shop-block .shop-name { font-size: 18px; font-weight: bold; color: #111; }
+          .shop-block .shop-detail { font-size: 12px; color: #555; line-height: 1.6; margin-top: 4px; }
+          .inv-block { text-align: right; }
+          .inv-block .inv-title { font-size: 32px; font-weight: bold; color: #111; }
+          .inv-block .inv-meta { font-size: 12px; color: #444; line-height: 1.8; margin-top: 4px; }
+          .inv-block .inv-meta strong { color: #111; }
+          /* Parties */
+          .parties { display: flex; gap: 32px; margin-bottom: 24px; }
           .party { flex: 1; }
-          .party-label { font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
-          .party-name { font-size: 16px; font-weight: bold; }
-          .party-details { font-size: 14px; color: #555; }
-          .vehicle-box { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 30px; }
-          .vehicle-title { font-size: 18px; font-weight: bold; margin-bottom: 10px; }
-          .vehicle-details { display: flex; gap: 30px; font-size: 14px; }
-          .vehicle-detail span { color: #666; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-          th { background: #333; color: white; padding: 12px; text-align: left; font-size: 14px; }
-          td { padding: 12px; border-bottom: 1px solid #ddd; font-size: 14px; }
-          tr.payment td { background: #f0fff0; }
-          .totals { margin-left: auto; width: 300px; }
-          .total-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; }
-          .total-row.final { font-size: 18px; font-weight: bold; border-top: 2px solid #333; margin-top: 10px; padding-top: 15px; }
-          .total-row.balance { color: ${invoice.balance > 0 ? '#dc3545' : '#28a745'}; }
-          .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #666; padding-top: 20px; border-top: 1px solid #ddd; }
+          .party-label { font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin-bottom: 6px; }
+          .party-name { font-size: 15px; font-weight: bold; color: #111; margin-bottom: 3px; }
+          .party-detail { font-size: 12px; color: #555; line-height: 1.6; }
+          /* Vehicle */
+          .vehicle-box { background: #f7f7f7; border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px 18px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; }
+          .vehicle-make { font-size: 15px; font-weight: bold; color: #111; margin-bottom: 4px; }
+          .vehicle-fields { display: flex; flex-wrap: wrap; gap: 16px; }
+          .vehicle-field { font-size: 12px; color: #555; }
+          .vehicle-field span { color: #888; font-size: 11px; display: block; }
+          /* Comments */
+          .comments-box { border: 1px solid #ddd; border-radius: 4px; padding: 12px 14px; margin-bottom: 24px; font-size: 12px; color: #444; }
+          .comments-label { font-weight: bold; font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 6px; }
+          /* Service sections */
+          .service-section { margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+          .service-header { background: #f0f0f0; padding: 10px 14px; font-weight: bold; font-size: 13px; border-bottom: 1px solid #ddd; }
+          .service-table { width: 100%; border-collapse: collapse; }
+          .service-table th { background: #fafafa; padding: 8px 14px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #666; border-bottom: 1px solid #e8e8e8; }
+          .service-table td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+          .service-table tr:last-child td { border-bottom: none; }
+          .service-note { font-size: 11px; color: #777; font-style: italic; margin-top: 3px; }
+          .service-footer { display: flex; justify-content: flex-end; gap: 24px; padding: 10px 14px; border-top: 1px solid #ddd; background: #fafafa; font-size: 12px; color: #555; }
+          .service-footer strong { color: #111; }
+          /* Totals */
+          .totals-wrap { display: flex; justify-content: flex-end; margin-bottom: 24px; }
+          .totals { width: 280px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+          .total-row { display: flex; justify-content: space-between; padding: 8px 14px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+          .total-row:last-child { border-bottom: none; }
+          .total-row.grand { font-size: 15px; font-weight: bold; background: #f0f0f0; }
+          .total-row.balance-row { font-size: 14px; font-weight: bold; color: ${invoice.balance > 0 ? '#c0392b' : '#27ae60'}; }
+          /* Warranty */
+          .warranty { border: 1px solid #ddd; border-radius: 4px; padding: 14px 18px; margin-bottom: 24px; font-size: 11px; color: #555; line-height: 1.6; }
+          .warranty-title { font-weight: bold; font-size: 12px; color: #333; margin-bottom: 8px; }
+          /* Signature */
+          .signature-line { margin-bottom: 24px; }
+          .sig-label { font-size: 12px; font-weight: bold; margin-bottom: 8px; }
+          .sig-box { border-bottom: 1px solid #333; width: 280px; height: 32px; }
+          /* Payments */
+          .payments-section { margin-bottom: 24px; }
+          .payments-section h4 { font-size: 13px; font-weight: bold; margin-bottom: 8px; }
+          .payments-table { width: 100%; border-collapse: collapse; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; font-size: 13px; }
+          .payments-table th { background: #f0f0f0; padding: 8px 14px; text-align: left; font-size: 11px; text-transform: uppercase; color: #666; }
+          .payments-table td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; }
+          .payments-table tr.pay-total td { background: #fafafa; border-top: 1px solid #ddd; border-bottom: none; }
+          /* Footer */
+          .footer { text-align: center; font-size: 11px; color: #888; padding-top: 16px; border-top: 1px solid #ddd; }
           @media print { body { padding: 20px; } }
         </style>
       </head>
       <body>
+        <!-- Header -->
         <div class="header">
-          <div class="logo">${settings.shopName}</div>
-          <div class="doc-info">
-            <div class="doc-type">INVOICE</div>
-            <div class="doc-number">${invoice.number}</div>
-            <div class="doc-number">Date: ${invoice.createdAt || invoice.convertedAt}</div>
-            <div class="doc-number">Due: ${invoice.dueAt}</div>
-            <div style="margin-top:8px"><span class="status ${invoice.status}">${invoice.status}</span></div>
+          <div class="shop-block">
+            <div class="shop-name">${settings.shopName}</div>
+            <div class="shop-detail">
+              ${settings.address ? settings.address+'<br>' : ''}
+              ${settings.phone}<br>
+              ${settings.email}${settings.website ? '<br>'+settings.website : ''}
+            </div>
+          </div>
+          <div class="inv-block">
+            <div class="inv-title">Invoice ${invoice.number}</div>
+            <div class="inv-meta">
+              <div>Created: <strong>${invoice.createdAt || ''}</strong></div>
+              <div>Invoiced: <strong>${invoice.convertedAt || ''}</strong></div>
+              <div>Payment Term: <strong>${payTerm}</strong></div>
+              <div>Payment Due: <strong>${invoice.dueAt || ''}</strong></div>
+              <div>Service Writer: <strong>${creatorName}</strong></div>
+              ${poNum ? `<div>PO #: <strong>${poNum}</strong></div>` : ''}
+            </div>
           </div>
         </div>
-        
+
+        <!-- Parties + Vehicle -->
         <div class="parties">
           <div class="party">
             <div class="party-label">Bill To</div>
             <div class="party-name">${customer ? getName(customer) : 'N/A'}</div>
-            <div class="party-details">${customer?.phone || ''}<br>${customer?.email || customer?.emails?.[0] || ''}</div>
+            <div class="party-detail">
+              ${customer ? getName(customer) : ''}<br>
+              ${custAddr}<br>
+              ${customer?.phone || customer?.phones?.[0] || ''}<br>
+              ${customer?.email || customer?.emails?.[0] || ''}
+            </div>
           </div>
           <div class="party">
-            <div class="party-label">From</div>
-            <div class="party-name">${settings.shopName}</div>
-            <div class="party-details">${settings.phone}<br>${settings.email}</div>
+            <div class="party-label">Vehicle</div>
+            ${vehicle ? `
+              <div class="party-name">${vehicle.year} ${vehicle.make} ${vehicle.model}</div>
+              <div class="party-detail">
+                VIN: ${vehicle.vin || 'N/A'}<br>
+                License Plate: ${vehicle.plate || 'N/A'}
+                ${vehicle.mileageIn != null ? '<br>Mileage In: '+vehicle.mileageIn.toLocaleString()+' mi' : ''}
+                ${vehicle.mileageOut != null ? '<br>Mileage Out: '+vehicle.mileageOut.toLocaleString()+' mi' : ''}
+              </div>
+            ` : '<div class="party-detail">No vehicle</div>'}
           </div>
         </div>
 
-        <div class="prepared-by">Prepared by: <strong>${users.find(u => u.id === invoice.createdBy)?.name || 'Staff'}</strong></div>
+        <!-- Customer comments -->
+        ${invoice.customerComments ? `
+          <div class="comments-box">
+            <div class="comments-label">Customer Comments</div>
+            ${invoice.customerComments}
+          </div>` : ''}
 
-        ${vehicle ? `<div class="vehicle-box">
-          <div class="vehicle-title">${vehicle.year} ${vehicle.make} ${vehicle.model}</div>
-          <div class="vehicle-details">
-            <div><span>VIN:</span> ${vehicle.vin || 'N/A'}</div>
-            <div><span>Plate:</span> ${vehicle.plate || 'N/A'}</div>
-            ${vehicle.engine ? `<div><span>Engine:</span> ${vehicle.engine}</div>` : ''}
-            ${vehicle.mileageIn != null ? `<div><span>Miles In:</span> ${vehicle.mileageIn.toLocaleString()}</div>` : ''}
-            ${vehicle.mileageOut != null ? `<div><span>Miles Out:</span> ${vehicle.mileageOut.toLocaleString()}</div>` : ''}
+        <!-- Line items as service sections -->
+        ${(invoice.items || []).map(item => {
+          const itemTotal = item.type==='labor' ? (item.hours||0)*(item.rate||settings.laborRate) :
+                            item.type==='part'  ? (item.quantity||1)*(item.cost||0) : (item.price||0);
+          const details = item.type==='labor' ? `${(item.hours||0).toFixed(4)}h × $${item.rate||settings.laborRate}/hr` :
+                          item.type==='part'  ? `Qty ${item.quantity||1} × $${(item.cost||0).toFixed(2)}` : 'Flat fee';
+          const discAmt = discPct > 0 && !customer?.taxExempt ? itemTotal * (discPct/100) : 0;
+          const itemNet = itemTotal - discAmt;
+          return `
+            <div class="service-section">
+              <div class="service-header">${item.description || 'Service'}</div>
+              <table class="service-table">
+                <thead><tr><th>#</th><th>Description</th><th style="text-align:right">Subtotal</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td>1</td>
+                    <td>
+                      ${item.description || 'Service'}
+                      ${item.customerNote ? `<div class="service-note">${item.customerNote}</div>` : ''}
+                      <div class="service-note">${details}</div>
+                    </td>
+                    <td style="text-align:right">$${itemTotal.toFixed(2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="service-footer">
+                ${discAmt > 0 ? `<span>Discount (${discPct}%): <strong>$${discAmt.toFixed(2)}</strong></span>` : ''}
+                <span>Total: <strong>$${itemNet.toFixed(2)}</strong></span>
+              </div>
+            </div>`;
+        }).join('')}
+
+        <!-- Totals -->
+        <div class="totals-wrap">
+          <div class="totals">
+            <div class="total-row"><span>Labor</span><span>$${subtotal.toFixed(2)}</span></div>
+            <div class="total-row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
+            ${discount > 0 ? `<div class="total-row"><span>Discount</span><span>$${discount.toFixed(2)}</span></div>` : ''}
+            <div class="total-row"><span>Shop Supplies</span><span>$0.00</span></div>
+            <div class="total-row"><span>EPA</span><span>$0.00</span></div>
+            ${customer?.taxExempt ? `<div class="total-row"><span>Tax</span><span>$0.00</span></div>` : `<div class="total-row"><span>Tax (${invoice.taxRate||settings.taxRate}%)</span><span>$${tax.toFixed(2)}</span></div>`}
+            <div class="total-row grand"><span>Grand Total</span><span>$${finalTotal.toFixed(2)}</span></div>
+            ${(invoice.payments||[]).length > 0 ? `<div class="total-row"><span>Paid to Date</span><span>($${(invoice.payments||[]).reduce((s,p)=>s+p.amount,0).toFixed(2)})</span></div>` : ''}
+            <div class="total-row balance-row"><span>REMAINING BALANCE</span><span>$${invoice.balance.toFixed(2)}</span></div>
           </div>
-        </div>` : ''}
-
-        <table>
-          <thead>
-            <tr>
-              <th>Description</th>
-              <th>Type</th>
-              <th>Details</th>
-              <th style="text-align:right">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml || '<tr><td colspan="4" style="text-align:center;color:#666;">No items</td></tr>'}
-            ${paymentsHtml}
-          </tbody>
-        </table>
-
-        <div class="totals">
-          <div class="total-row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
-          ${discount > 0 ? `<div class="total-row"><span>Discount (${discPct}%)</span><span>-$${discount.toFixed(2)}</span></div>` : ''}
-          ${customer?.taxExempt ? `<div class="total-row" style="color:#2d936c"><span>Tax</span><span>Exempt</span></div>` : `<div class="total-row"><span>Tax (${invoice.taxRate || settings.taxRate}%)</span><span>$${tax.toFixed(2)}</span></div>`}
-          <div class="total-row final"><span>Total</span><span>$${finalTotal.toFixed(2)}</span></div>
-          <div class="total-row balance"><span>Balance Due</span><span>$${invoice.balance.toFixed(2)}</span></div>
         </div>
+
+        <!-- Warranty -->
+        <div class="warranty">
+          <div class="warranty-title">Limited Warranty &amp; Disclaimer</div>
+          ${settings.warrantyText || 'Kaizen Automotive confirms that the diagnostic tests and calibration of the vehicle sensors on the vehicle were completed at the repair facility on the date stated above. Kaizen Automotive warrants that the final diagnostic tests confirm that the vehicle sensors were calibrated to perform in accordance with the specifications of the manufacturer. Kaizen Automotive does not offer any warranty or make any representation whatsoever once the vehicle leaves the repair facility.<br><br>Accuracy of replacement modules or components requiring programming, encoding, or configuration to the vehicle must be verified to "match" hardware and/or software numbers where applicable, we are not responsible for "mismatched" hardware or software that will not program to the vehicle by OEM equipment or modules/components replaced which result in similar or unforeseen concerns (additional module processing, software action, or diagnostics may be required).'}
+        </div>
+
+        <!-- Substantially all services note -->
+        <p style="font-size:11px;color:#666;margin-bottom:20px;">Substantially all services include "pre" and "post" scan reports, vehicle condition and prerequisite checks, and functionality checks (which may include road-testing) for any ADAS calibrations, programming, or diagnostics.</p>
+
+        <!-- Signature -->
+        <div class="signature-line">
+          <div class="sig-label">Signature</div>
+          <div class="sig-box"></div>
+        </div>
+
+        <!-- Payments -->
+        ${paymentsTableHtml}
 
         <div class="footer">
-          Thank you for your business!<br>
           ${settings.shopName} • ${settings.phone} • ${settings.email}
         </div>
       </body>
@@ -2718,6 +2823,16 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
             <div><span>Created By</span><span>{users.find(u => u.id === doc.createdBy)?.name || '-'}</span></div>
             {isInvoice && doc.dueAt && <div><span>Due Date</span><span>{doc.dueAt}</span></div>}
             {isInvoice && doc.convertedAt && <div><span>Invoiced</span><span>{doc.convertedAt}</span></div>}
+            {isInvoice && (
+              <div className="kf-meta-field"><span>PO #</span><input value={doc.poNumber||''} onChange={e=>updateSilent({poNumber:e.target.value})} placeholder="Optional" className="kf-meta-input"/></div>
+            )}
+            {isInvoice && (
+              <div className="kf-meta-field"><span>Payment Term</span>
+                <select value={doc.paymentTerm||'Net 30'} onChange={e=>updateSilent({paymentTerm:e.target.value})} className="kf-meta-input">
+                  <option>Due on Receipt</option><option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option><option>Net 90</option>
+                </select>
+              </div>
+            )}
           </div>
         </div>
       </div>
