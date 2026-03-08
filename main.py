@@ -392,6 +392,50 @@ async def company_restore(cid: str, file: UploadFile = File(...)):
     with open(db, 'wb') as f: f.write(content)
     return {"ok": True}
 
+class RepairMasterRequest(BaseModel):
+    name: str
+    password: str
+    email: Optional[str] = ''
+
+@app.post("/api/superadmin/companies/{cid}/repair-master")
+async def repair_master_admin(cid: str, body: RepairMasterRequest):
+    """Re-create or replace the master_admin user for a company."""
+    company = get_company(cid)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    conn = get_company_db(cid)
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM store WHERE key='users'")
+    row = cur.fetchone()
+    users = json.loads(row["value"]) if row else []
+    # Remove any existing master_admin entries
+    users = [u for u in users if u.get("role") != "master_admin"]
+    # Insert fresh master admin
+    master = {
+        "id": f"u_{cid}_master",
+        "name": body.name,
+        "email": body.email or '',
+        "password": body.password,
+        "role": "master_admin",
+        "locationId": "loc1",
+        "companyId": cid
+    }
+    users.insert(0, master)
+    cur.execute(
+        "INSERT INTO store (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+        ("users", json.dumps(users))
+    )
+    conn.commit()
+    conn.close()
+    # Also update the registry masterAdmin display name
+    reg = load_registry()
+    c = next((x for x in reg["companies"] if x["id"] == cid), None)
+    if c:
+        c["masterAdmin"] = body.name
+        save_registry(reg)
+    return {"ok": True, "master": master}
+
 @app.get("/api/health")
 async def health():
     reg = load_registry()
