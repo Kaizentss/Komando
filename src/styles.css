@@ -1350,3 +1350,30 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
   opacity: 0.8;
 }
 .kf-rate-reset:hover { opacity: 1; text-decoration: underline; }
+
+/* ===== Canned Item Subtotal Auto-calc ===== */
+.kf-subtotal-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+.kf-subtotal-row .kf-form-group { flex: 1; }
+.kf-subtotal-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding-bottom: 8px;
+  white-space: nowrap;
+}
+.kf-subtotal-preview strong {
+  font-size: 1.1rem;
+  color: var(--text);
+}
+.kf-label-hint {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
