@@ -9,6 +9,7 @@ import {
   MapPin, Shield, SlidersHorizontal, Globe, Database, Download, RefreshCw,
   PowerOff, Key, AlertTriangle
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ITEM_TYPES = [
@@ -734,7 +735,7 @@ export default function App() {
           {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)} onDelete={i=>{if(confirm(`Delete ${i.number}? This cannot be undone.`)){setInvoices(invoices.filter(x=>x.id!==i.id));notify('Invoice deleted');}}}/>}
           {view==='canned'     && <CannedItemsView cannedItems={cannedItems} setCannedItems={setCannedItems} settings={settings} notify={notify}/>}
           {view==='messages'   && <MessagesView/>}
-          {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
+          {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} customers={customers} setCustomers={setCustomers} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
         </div>
       </main>
 
@@ -838,7 +839,7 @@ function MessagesView() {
   return <div className="kf-empty" style={{height:400}}><MessageSquare size={60}/><p>Messaging coming soon</p></div>;
 }
 
-function SettingsView({settings,setSettings,users,setUsers,locations,setLocations,currentUser,company,notify}) {
+function SettingsView({settings,setSettings,users,setUsers,locations,setLocations,customers,setCustomers,currentUser,company,notify}) {
   const [localSettings,setLocalSettings]=useState(settings);
   const [tab,setTab]=useState('general');
   const [newUser,setNewUser]=useState({name:'',email:'',password:'',role:'technician',locationId:locations[0]?.id||''});
@@ -852,6 +853,106 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
 
   const isMaster=currentUser.role==='master_admin';
   const isAdmin=currentUser.role==='admin'||isMaster;
+  const [importFile, setImportFile] = useState(null);
+  const [importPreview, setImportPreview] = useState(null); // {type, rows, errors}
+  const [importing, setImporting] = useState(false);
+  const importRef = useRef(null);
+
+  const parseShopmonkeyFleet = (workbook) => {
+    // Find the sheet
+    const ws = workbook.Sheets[workbook.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+    // Row 3 (index 2) is the header row in SM fleet exports
+    const headerRow = raw.findIndex(r => r && r[0] === 'Company Name*');
+    if (headerRow === -1) return {error: 'Could not find Shopmonkey fleet headers. Make sure this is a fleet export.'};
+    const headers = raw[headerRow];
+    const dataRows = raw.slice(headerRow + 1).filter(r => r && r[0]);
+    const idx = (name) => headers.findIndex(h => h && h.toString().startsWith(name));
+    const iName=idx('Company Name'), iPhone=idx('Primary Phone'), iEmail=idx('Primary Email'),
+          iAddr1=idx('Address 1'), iAddr2=idx('Address 2'), iCity=idx('City'), iState=idx('State'),
+          iZip=idx('Zip'), iNote=idx('Note'), iTaxExempt=idx('Tax Exempt'), iCreated=idx('Date Created');
+    const rows = dataRows.map((r, i) => ({
+      _row: headerRow + 2 + i,
+      companyName: r[iName]?.toString().trim() || '',
+      phones: [r[iPhone]?.toString().trim()].filter(Boolean),
+      phone: r[iPhone]?.toString().trim() || '',
+      emails: [r[iEmail]?.toString().trim()].filter(Boolean),
+      email: r[iEmail]?.toString().trim() || '',
+      address: [r[iAddr1], r[iAddr2]].filter(Boolean).join(', '),
+      city: r[iCity]?.toString().trim() || '',
+      state: r[iState]?.toString().trim() || '',
+      zip: r[iZip]?.toString().trim() || '',
+      note: r[iNote]?.toString().trim() || '',
+      taxExempt: r[iTaxExempt] === true || r[iTaxExempt] === 'TRUE' || r[iTaxExempt] === 'Yes',
+      smCreatedAt: r[iCreated]?.toString().trim() || '',
+    })).filter(r => r.companyName);
+    return {type:'fleet', rows, errors:[]};
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImportFile(file.name);
+    setImportPreview(null);
+    try {
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, {type:'array'});
+      // Detect type by headers
+      const ws = workbook.Sheets[workbook.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+      const headerRow = raw.find(r => r && r.some(v => v));
+      const headerStr = (headerRow||[]).join('|').toLowerCase();
+      let result;
+      if (headerStr.includes('company name')) {
+        result = parseShopmonkeyFleet(workbook);
+      } else {
+        result = {error: 'Unrecognized export format. Supported: Shopmonkey Fleet export.'};
+      }
+      if (result.error) { notify(result.error, 'error'); setImportFile(null); return; }
+      setImportPreview(result);
+    } catch(err) {
+      notify('Failed to read file: ' + err.message, 'error');
+      setImportFile(null);
+    }
+  };
+
+  const handleDoImport = () => {
+    if (!importPreview) return;
+    setImporting(true);
+    const existing = customers.map(c => (c.companyName||'').toLowerCase().trim());
+    let added = 0, skipped = 0;
+    const newCustomers = [...customers];
+    for (const row of importPreview.rows) {
+      const nameLower = row.companyName.toLowerCase().trim();
+      if (existing.includes(nameLower)) { skipped++; continue; }
+      newCustomers.push({
+        id: `c${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+        type: 'fleet',
+        companyName: row.companyName,
+        contactName: '',
+        phones: row.phones,
+        phone: row.phone,
+        emails: row.emails,
+        email: row.email,
+        address: row.address,
+        city: row.city,
+        state: row.state,
+        zip: row.zip,
+        note: row.note,
+        taxExempt: row.taxExempt,
+        discountAppliesTo: {labor:true,parts:true,fees:true},
+        totalSpent: 0,
+        createdAt: new Date().toISOString().split('T')[0],
+      });
+      existing.push(nameLower);
+      added++;
+    }
+    setCustomers(newCustomers);
+    setImporting(false);
+    setImportPreview(null);
+    setImportFile(null);
+    notify(`Import complete: ${added} added, ${skipped} skipped (duplicates)`);
+  };
   const saveSettings=()=>{setSettings(localSettings);notify('Settings saved');};
 
   const addUser=()=>{
@@ -914,6 +1015,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
         {isAdmin&&<button className={tab==='locations'?'active':''} onClick={()=>setTab('locations')}><MapPin size={16}/>Locations</button>}
         <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}><Users size={16}/>Users</button>
         {isMaster&&<button className={tab==='backup'?'active':''} onClick={()=>setTab('backup')}><Database size={16}/>Backup</button>}
+        {isAdmin&&<button className={tab==='import'?'active':''} onClick={()=>setTab('import')}><Upload size={16}/>Import</button>}
       </div>
 
       {tab==='general'&&(
@@ -1015,6 +1117,64 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
               <input ref={restoreRef} type="file" accept=".db" style={{display:'none'}} onChange={handleRestore}/>
             </label>
           </div>
+        </div>
+      )}
+
+      {tab==='import'&&isAdmin&&(
+        <div className="kf-card wide">
+          <h3><Upload size={20}/> Import from Shopmonkey</h3>
+          <p className="kf-sub" style={{marginBottom:20}}>Upload an export file from Shopmonkey. Duplicates (matched by company name) are automatically skipped.</p>
+
+          <div className="kf-import-formats">
+            <div className="kf-import-format-card">
+              <div className="kf-import-format-icon"><Users size={20}/></div>
+              <div><strong>Fleet Customers</strong><div className="kf-sub" style={{fontSize:'0.78rem'}}>Shopmonkey → Reports → Fleet → Export</div></div>
+            </div>
+          </div>
+
+          <div className="kf-import-dropzone" onClick={()=>importRef.current?.click()}>
+            <Upload size={28}/>
+            <div>{importFile ? <><strong>{importFile}</strong><br/><span className="kf-sub">Click to change</span></> : <><strong>Click to choose file</strong><br/><span className="kf-sub">.xlsx files from Shopmonkey exports</span></>}</div>
+            <input ref={importRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={handleImportFile}/>
+          </div>
+
+          {importPreview && (
+            <div className="kf-import-preview">
+              <div className="kf-import-preview-header">
+                <div>
+                  <strong>{importPreview.rows.length} records ready to import</strong>
+                  <span className="kf-sub" style={{marginLeft:12}}>
+                    {importPreview.rows.filter(r => (customers||[]).map(c=>(c.companyName||'').toLowerCase().trim()).includes(r.companyName.toLowerCase().trim())).length} duplicates will be skipped
+                  </span>
+                </div>
+                <button className="kf-btn primary" onClick={handleDoImport} disabled={importing}>
+                  {importing ? <Loader2 size={16} className="spin"/> : <Upload size={16}/>}
+                  Import {importPreview.rows.length} Records
+                </button>
+              </div>
+              <div className="kf-import-table-wrap">
+                <table className="kf-import-table">
+                  <thead><tr><th>Company Name</th><th>Phone</th><th>Email</th><th>City/State</th><th>Tax Exempt</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {importPreview.rows.slice(0,50).map((r,i) => {
+                      const isDupe = (customers||[]).some(c => (c.companyName||'').toLowerCase().trim() === r.companyName.toLowerCase().trim());
+                      return (
+                        <tr key={i} className={isDupe ? 'dupe' : ''}>
+                          <td>{r.companyName}</td>
+                          <td>{r.phone || '—'}</td>
+                          <td>{r.email || '—'}</td>
+                          <td>{[r.city,r.state].filter(Boolean).join(', ') || '—'}</td>
+                          <td>{r.taxExempt ? <span className="kf-badge sm green">Exempt</span> : '—'}</td>
+                          <td>{isDupe ? <span className="kf-sub">Skip (exists)</span> : <span style={{color:'var(--success)'}}>New</span>}</td>
+                        </tr>
+                      );
+                    })}
+                    {importPreview.rows.length > 50 && <tr><td colSpan={6} className="kf-sub" style={{textAlign:'center',padding:12}}>...and {importPreview.rows.length - 50} more</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
