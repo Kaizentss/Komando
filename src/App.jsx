@@ -741,7 +741,7 @@ export default function App() {
       {modal==='custAdd'    && <CustomerForm onClose={closeModal} onSave={c=>{handleAddCustomer(c);closeModal();notify('Customer added');}}/>}
       {modal==='custDetail' && selected && <CustomerDetail customer={selected} vehicles={vehicles.filter(v=>v.customerId===selected.id)} getName={getName} onClose={closeModal}/>}
       {modal==='vehAdd'     && <VehicleForm customers={sorted} getName={getName} onClose={closeModal} onSave={v=>{handleAddVehicle(v);closeModal();notify('Vehicle added');}} notify={notify}/>}
-      {modal==='invDetail'  && selected && <InvoiceDetail invoice={selected} customer={customers.find(c=>c.id===selected.customerId)} vehicle={vehicles.find(v=>v.id===selected.vehicleId)} settings={settings} getName={getName} onClose={closeModal} onRevert={()=>{handleRevertToEstimate(selected);closeModal();}} onPay={p=>{const upd={...selected,payments:[...(selected.payments||[]),p],balance:selected.balance-p.amount,status:selected.balance-p.amount<=0?'paid':'partial'};setInvoices(invoices.map(i=>i.id===selected.id?upd:i));setSelected(upd);notify('Payment recorded');}}/>}
+      {modal==='invDetail'  && selected && <InvoiceDetail invoice={selected} customer={customers.find(c=>c.id===selected.customerId)} vehicle={vehicles.find(v=>v.id===selected.vehicleId)} settings={settings} users={users} getName={getName} onClose={closeModal} onRevert={()=>{handleRevertToEstimate(selected);closeModal();}} onPay={p=>{const upd={...selected,payments:[...(selected.payments||[]),p],balance:selected.balance-p.amount,status:selected.balance-p.amount<=0?'paid':'partial'};setInvoices(invoices.map(i=>i.id===selected.id?upd:i));setSelected(upd);notify('Payment recorded');}}/>}
     </div>
   );
 }
@@ -1309,7 +1309,7 @@ function VehicleForm({customers, getName, onClose, onSave, notify, preselectedCu
   return <div className="kf-overlay" onClick={onClose}><div className="kf-modal" onClick={e=>e.stopPropagation()}><div className="kf-modal-header"><h2>Add Vehicle</h2><button className="kf-close" onClick={onClose}><X size={20}/></button></div><form onSubmit={e=>{e.preventDefault();onSave(f);}}><div className="kf-modal-body">{!preselectedCustomer&&<div className="kf-form-group"><label>Owner *</label><select required value={f.customerId} onChange={e=>setF({...f,customerId:e.target.value})}><option value="">Select...</option>{customers.map(c=><option key={c.id} value={c.id}>{getName(c)}</option>)}</select></div>}<div className="kf-form-group"><label>VIN *</label><div className="kf-input-btn"><input required maxLength={17} value={f.vin} onChange={e=>setF({...f,vin:e.target.value.toUpperCase()})}/><button type="button" onClick={handleDecode} disabled={loading||f.vin.length<17}>{loading?<Loader2 size={16} className="spin"/>:<Zap size={16}/>}</button></div></div><div className="kf-row"><div className="kf-form-group"><label>Year</label><input value={f.year} onChange={e=>setF({...f,year:e.target.value})}/></div><div className="kf-form-group"><label>Make</label><input value={f.make} onChange={e=>setF({...f,make:e.target.value})}/></div><div className="kf-form-group"><label>Model</label><input value={f.model} onChange={e=>setF({...f,model:e.target.value})}/></div></div><div className="kf-row"><div className="kf-form-group"><label>Plate</label><input value={f.plate} onChange={e=>setF({...f,plate:e.target.value.toUpperCase()})}/></div><div className="kf-form-group"><label>State</label><select value={f.plateState} onChange={e=>setF({...f,plateState:e.target.value})}>{US_STATES.map(s=><option key={s}>{s}</option>)}</select></div></div></div><div className="kf-modal-footer"><button type="button" className="kf-btn secondary" onClick={onClose}>Cancel</button><button type="submit" className="kf-btn primary"><Save size={16}/>Save</button></div></form></div></div>;
 }
 
-function InvoiceDetail({invoice, customer, vehicle, settings, getName, onClose, onRevert, onPay}) {
+function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, onClose, onRevert, onPay}) {
   const [showPay,setShowPay]=useState(false);
   const [method,setMethod]=useState('card');
   const [amt,setAmt]=useState(invoice.balance);
@@ -1359,6 +1359,8 @@ function InvoiceDetail({invoice, customer, vehicle, settings, getName, onClose, 
           .status.unpaid { background: #f8d7da; color: #721c24; }
           .status.partial { background: #fff3cd; color: #856404; }
           .parties { display: flex; gap: 40px; margin-bottom: 30px; }
+
+          .prepared-by { font-size: 12px; color: #666; margin-bottom: 20px; margin-top: -18px; }
           .party { flex: 1; }
           .party-label { font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
           .party-name { font-size: 16px; font-weight: bold; }
@@ -1403,6 +1405,8 @@ function InvoiceDetail({invoice, customer, vehicle, settings, getName, onClose, 
             <div class="party-details">${settings.phone}<br>${settings.email}</div>
           </div>
         </div>
+
+        <div class="prepared-by">Prepared by: <strong>${users.find(u => u.id === invoice.createdBy)?.name || 'Staff'}</strong></div>
 
         ${vehicle ? `<div class="vehicle-box">
           <div class="vehicle-title">${vehicle.year} ${vehicle.make} ${vehicle.model}</div>
@@ -2124,6 +2128,8 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
           .doc-type { font-size: 28px; font-weight: bold; color: #333; }
           .doc-number { font-size: 14px; color: #666; }
           .parties { display: flex; gap: 40px; margin-bottom: 30px; }
+
+          .prepared-by { font-size: 12px; color: #666; margin-bottom: 20px; margin-top: -18px; }
           .party { flex: 1; }
           .party-label { font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
           .party-name { font-size: 16px; font-weight: bold; }
@@ -2167,6 +2173,8 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
             <div class="party-details">${settings.phone}<br>${settings.email}</div>
           </div>
         </div>
+
+        <div class="prepared-by">Prepared by: <strong>${users.find(u => u.id === doc.createdBy)?.name || 'Staff'}</strong></div>
 
         <div class="vehicle-box">
           <div class="vehicle-title">${vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : 'No Vehicle'}</div>
