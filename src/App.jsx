@@ -1909,6 +1909,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
   const [saveStatus, setSaveStatus] = useState('saved'); // 'saved' | 'pending' | 'saving'
   const [cannedSearch, setCannedSearch] = useState('');
   const [showCannedDropdown, setShowCannedDropdown] = useState(false);
+  const [expandedCannedCats, setExpandedCannedCats] = useState({});
   const [showPayment, setShowPayment] = useState(false);
   const [payMethod, setPayMethod] = useState('card');
   const [payAmount, setPayAmount] = useState(0);
@@ -1997,15 +1998,26 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
   // Filter canned items by search
   const allCannedItems = cannedItems?.items || [];
   const cannedCategories = cannedItems?.categories || [];
-  const filteredCannedItems = cannedSearch.trim() 
-    ? allCannedItems.filter(item => 
-        item.name.toLowerCase().includes(cannedSearch.toLowerCase()) ||
-        item.description?.toLowerCase().includes(cannedSearch.toLowerCase()) ||
-        item.notes?.toLowerCase().includes(cannedSearch.toLowerCase())
-      )
-    : allCannedItems;
-
   const getCategoryName = (catId) => cannedCategories.find(c => c.id === catId)?.name || 'Uncategorized';
+
+  // Build category-grouped search results
+  const searchTerm = cannedSearch.trim().toLowerCase();
+  const filteredCannedCategories = searchTerm
+    ? cannedCategories
+        .map(cat => {
+          const catMatches = cat.name.toLowerCase().includes(searchTerm);
+          const matchingItems = allCannedItems.filter(item =>
+            item.categoryId === cat.id && (
+              catMatches ||
+              item.name.toLowerCase().includes(searchTerm) ||
+              item.description?.toLowerCase().includes(searchTerm) ||
+              item.notes?.toLowerCase().includes(searchTerm)
+            )
+          );
+          return matchingItems.length > 0 ? { ...cat, items: matchingItems, autoExpand: true } : null;
+        })
+        .filter(Boolean)
+    : [];
 
   const addCannedItem = (cannedItem) => {
     const newItem = {
@@ -2311,28 +2323,40 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
                       {showCannedDropdown && (
                         <div className="kf-canned-dropdown">
                           <div className="kf-canned-dropdown-list">
-                            {filteredCannedItems.length === 0 ? (
-                              <div className="kf-canned-empty">{cannedSearch ? 'No items match your search' : 'No canned items yet'}</div>
+                            {filteredCannedCategories.length === 0 ? (
+                              <div className="kf-canned-empty">No categories or items match "{cannedSearch}"</div>
                             ) : (
-                              filteredCannedItems.map(item => (
-                                <div key={item.id} className="kf-canned-result" onMouseDown={e => { e.preventDefault(); addCannedItem(item); setCannedSearch(''); setShowCannedDropdown(false); }}>
-                                  <div className={`kf-cr-icon ${item.type}`}>
-                                    {item.type === 'labor' ? <Clock size={15}/> : item.type === 'part' ? <Package size={15}/> : <Tag size={15}/>}
-                                  </div>
-                                  <div className="kf-cr-info">
-                                    <div className="kf-cr-name">{item.name}</div>
-                                    <div className="kf-cr-meta">
-                                      <span className="kf-cr-cat">{getCategoryName(item.categoryId)}</span>
-                                      <span className="kf-cr-price">
-                                        {item.type === 'labor' && `${item.hours}h × $${item.rate || settings.laborRate}/hr`}
-                                        {item.type === 'part' && `qty ${item.quantity} · $${item.cost} ea`}
-                                        {item.type === 'fee' && `flat $${item.price}`}
-                                      </span>
+                              filteredCannedCategories.map(cat => {
+                                const isExpanded = cat.autoExpand || expandedCannedCats[cat.id];
+                                return (
+                                  <div key={cat.id} className="kf-canned-cat-group">
+                                    <div className="kf-canned-cat-header" onMouseDown={e => { e.preventDefault(); setExpandedCannedCats(prev => ({...prev, [cat.id]: !prev[cat.id]})); }}>
+                                      <Layers size={13}/>
+                                      <span>{cat.name}</span>
+                                      <span className="kf-canned-cat-count">{cat.items.length} item{cat.items.length !== 1 ? 's' : ''}</span>
+                                      <ChevronDown size={13} style={{marginLeft:'auto', transform: isExpanded ? 'rotate(180deg)' : 'none', transition:'transform 0.15s'}}/>
                                     </div>
+                                    {isExpanded && cat.items.map(item => (
+                                      <div key={item.id} className="kf-canned-result" onMouseDown={e => { e.preventDefault(); addCannedItem(item); setCannedSearch(''); setShowCannedDropdown(false); setExpandedCannedCats({}); }}>
+                                        <div className={`kf-cr-icon ${item.type}`}>
+                                          {item.type === 'labor' ? <Clock size={14}/> : item.type === 'part' ? <Package size={14}/> : <Tag size={14}/>}
+                                        </div>
+                                        <div className="kf-cr-info">
+                                          <div className="kf-cr-name">{item.name}</div>
+                                          <div className="kf-cr-meta">
+                                            <span className="kf-cr-price">
+                                              {item.type === 'labor' && `${item.hours}h × $${item.rate || settings.laborRate}/hr`}
+                                              {item.type === 'part' && `qty ${item.quantity} · $${item.cost} ea`}
+                                              {item.type === 'fee' && `flat $${item.price}`}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="kf-cr-add"><Plus size={14}/></div>
+                                      </div>
+                                    ))}
                                   </div>
-                                  <div className="kf-cr-add"><Plus size={14}/></div>
-                                </div>
-                              ))
+                                );
+                              })
                             )}
                           </div>
                         </div>
