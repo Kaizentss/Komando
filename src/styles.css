@@ -723,8 +723,12 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
   gap: 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border-radius: 10px;
+  padding: 11px 16px;
+  transition: border-color 0.15s;
+}
+.kf-canned-search:focus-within {
+  border-color: rgba(230,57,70,0.5);
 }
 .kf-canned-search input {
   flex: 1;
@@ -732,105 +736,128 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
   background: transparent;
   padding: 0;
   font-size: 0.95rem;
+  color: var(--text);
 }
 .kf-canned-search input:focus {
   outline: none;
 }
-.kf-canned-search svg {
+.kf-canned-search > svg {
   color: var(--text-dim);
+  flex-shrink: 0;
 }
 .kf-clear-search {
   color: var(--text-dim);
   padding: 2px;
+  line-height: 0;
+  border-radius: 4px;
 }
 .kf-clear-search:hover {
   color: var(--text);
+  background: rgba(255,255,255,0.08);
 }
 .kf-canned-dropdown {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 6px);
   left: 0;
   right: 0;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-top: 4px;
-  max-height: 320px;
-  overflow-y: auto;
+  background: #1e1e1e;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  overflow: hidden;
   z-index: 999;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(230,57,70,0.15);
+}
+.kf-canned-dropdown-list {
+  max-height: 360px;
+  overflow-y: auto;
 }
 .kf-canned-empty {
-  padding: 20px;
+  padding: 28px 20px;
   text-align: center;
   color: var(--text-dim);
-  font-size: 0.9rem;
+  font-size: 0.88rem;
 }
 .kf-canned-result {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 14px;
+  padding: 11px 16px;
   cursor: pointer;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  transition: background 0.1s;
 }
-.kf-canned-result:last-of-type {
+.kf-canned-result:last-child {
   border-bottom: none;
 }
 .kf-canned-result:hover {
   background: rgba(230,57,70,0.1);
 }
 .kf-cr-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  background: rgba(230,57,70,0.15);
-  color: var(--primary);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
+.kf-cr-icon.labor { background: rgba(230,57,70,0.15); color: var(--primary); }
+.kf-cr-icon.part  { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.kf-cr-icon.fee   { background: rgba(234,179,8,0.15);  color: #fbbf24; }
 .kf-cr-info {
   flex: 1;
   min-width: 0;
 }
 .kf-cr-name {
   font-weight: 500;
-  font-size: 0.95rem;
-  margin-bottom: 2px;
+  font-size: 0.9rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .kf-cr-meta {
   display: flex;
-  gap: 10px;
-  font-size: 0.8rem;
-  color: var(--text-dim);
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
 }
 .kf-cr-cat {
-  background: rgba(255,255,255,0.1);
-  padding: 1px 6px;
-  border-radius: 3px;
+  font-size: 0.72rem;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-dim);
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
 }
 .kf-cr-price {
+  font-size: 0.78rem;
+  font-weight: 600;
   color: var(--success);
+  white-space: nowrap;
 }
 .kf-cr-add {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-dim);
   flex-shrink: 0;
+  transition: all 0.15s;
 }
 .kf-canned-result:hover .kf-cr-add {
+  border-color: var(--primary);
   color: var(--primary);
+  background: rgba(230,57,70,0.1);
 }
 .kf-canned-dropdown-footer {
-  padding: 8px;
-  text-align: center;
-  font-size: 0.75rem;
-  color: var(--text-dim);
-  background: rgba(0,0,0,0.2);
-  cursor: pointer;
-}
-.kf-canned-dropdown-footer:hover {
-  color: var(--text);
+  display: none;
 }
 .kf-add-item-bar {
   position: relative;
