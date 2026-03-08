@@ -1329,12 +1329,13 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
       const details = item.type === 'labor' ? `${item.hours}h × $${item.rate || settings.laborRate}/hr` :
                       item.type === 'part' ? `${item.quantity} × $${(item.cost || 0).toFixed(2)}` :
                       'Flat fee';
+      const noteRow = item.customerNote ? `<tr class="item-note-row"><td colspan="4" style="padding:2px 8px 8px 8px;color:#888;font-size:11px;font-style:italic">${item.customerNote}</td></tr>` : '';
       return `<tr>
         <td>${item.description || 'Untitled'}</td>
         <td style="text-transform:capitalize">${item.type}</td>
         <td>${details}</td>
         <td style="text-align:right">$${itemTotal.toFixed(2)}</td>
-      </tr>`;
+      </tr>${noteRow}`;
     }).join('');
 
     const paymentsHtml = (invoice.payments || []).map(p => 
@@ -2106,12 +2107,13 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
       const details = item.type === 'labor' ? `${item.hours}h × $${item.rate || settings.laborRate}/hr` :
                       item.type === 'part' ? `${item.quantity} × $${(item.cost || 0).toFixed(2)}` :
                       'Flat fee';
+      const noteRow = item.customerNote ? `<tr class="item-note-row"><td colspan="4" style="padding:2px 8px 8px 8px;color:#888;font-size:11px;font-style:italic">${item.customerNote}</td></tr>` : '';
       return `<tr>
         <td>${item.description || 'Untitled'}</td>
         <td style="text-transform:capitalize">${item.type}</td>
         <td>${details}</td>
         <td style="text-align:right">$${itemTotal.toFixed(2)}</td>
-      </tr>`;
+      </tr>${noteRow}`;
     }).join('');
 
     printWindow.document.write(`
@@ -2450,29 +2452,58 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
 function LineItem({item, users, settings, canEdit, onUpdate, onDelete}) {
   const TypeIcon = item.type === 'labor' ? Clock : item.type === 'part' ? Package : Tag;
   const total = calcItemTotal(item, settings.laborRate);
+  const [showNotes, setShowNotes] = useState(!!(item.customerNote || item.internalNote));
 
   if (!canEdit) {
-    return <div className="kf-line-item view"><div className="kf-li-type"><TypeIcon size={16}/></div><div className="kf-li-desc">{item.description || 'Untitled'}</div><div className="kf-li-details">{item.type === 'labor' && `${item.hours}h × $${item.rate || settings.laborRate}`}{item.type === 'part' && `${item.quantity} × $${item.cost}`}{item.type === 'fee' && 'Flat'}</div><div className="kf-li-tech">{users.find(u => u.id === item.technicianId)?.name || '-'}</div><div className="kf-li-total">${total.toFixed(2)}</div></div>;
+    return (
+      <div className="kf-line-item-wrap">
+        <div className="kf-line-item view">
+          <div className="kf-li-type"><TypeIcon size={16}/></div>
+          <div className="kf-li-desc">
+            {item.description || 'Untitled'}
+            {item.customerNote && <div className="kf-li-customer-note">{item.customerNote}</div>}
+          </div>
+          <div className="kf-li-details">{item.type === 'labor' && `${item.hours}h × $${item.rate || settings.laborRate}`}{item.type === 'part' && `${item.quantity} × $${item.cost}`}{item.type === 'fee' && 'Flat'}</div>
+          <div className="kf-li-tech">{users.find(u => u.id === item.technicianId)?.name || '-'}</div>
+          <div className="kf-li-total">${total.toFixed(2)}</div>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="kf-line-item edit">
-      <div className="kf-li-type"><TypeIcon size={16}/></div>
-      <input className="kf-li-desc" value={item.description || ''} onChange={e => onUpdate(item.id, {description: e.target.value})} placeholder="Description..."/>
-      {item.type === 'labor' && (
-        <div className="kf-li-fields">
-          <div className="kf-field"><label>Hrs</label><input type="number" step="0.25" value={item.hours || ''} onChange={e => onUpdate(item.id, {hours: +e.target.value || 0})}/></div>
-          <div className="kf-field">
-            <label>Rate {item.rate > 0 && item.rate !== settings.laborRate && <button className="kf-rate-reset" title="Reset to location rate" onClick={() => onUpdate(item.id, {rate: 0})}>↺ {settings.laborRate}</button>}</label>
-            <input type="number" placeholder={settings.laborRate} value={item.rate || ''} onChange={e => onUpdate(item.id, {rate: +e.target.value || 0})}/>
+    <div className="kf-line-item-wrap">
+      <div className="kf-line-item edit">
+        <div className="kf-li-type"><TypeIcon size={16}/></div>
+        <input className="kf-li-desc" value={item.description || ''} onChange={e => onUpdate(item.id, {description: e.target.value})} placeholder="Description..."/>
+        {item.type === 'labor' && (
+          <div className="kf-li-fields">
+            <div className="kf-field"><label>Hrs</label><input type="number" step="0.25" value={item.hours || ''} onChange={e => onUpdate(item.id, {hours: +e.target.value || 0})}/></div>
+            <div className="kf-field">
+              <label>Rate {item.rate > 0 && item.rate !== settings.laborRate && <button className="kf-rate-reset" title="Reset to location rate" onClick={() => onUpdate(item.id, {rate: 0})}>↺ {settings.laborRate}</button>}</label>
+              <input type="number" placeholder={settings.laborRate} value={item.rate || ''} onChange={e => onUpdate(item.id, {rate: +e.target.value || 0})}/>
+            </div>
+          </div>
+        )}
+        {item.type === 'part' && <div className="kf-li-fields"><div className="kf-field"><label>Qty</label><input type="number" min="1" value={item.quantity || 1} onChange={e => onUpdate(item.id, {quantity: +e.target.value || 1})}/></div><div className="kf-field"><label>Cost</label><input type="number" step="0.01" value={item.cost || ''} onChange={e => onUpdate(item.id, {cost: +e.target.value || 0})}/></div></div>}
+        {item.type === 'fee' && <div className="kf-li-fields"><div className="kf-field"><label>Amt</label><input type="number" step="0.01" value={item.price || ''} onChange={e => onUpdate(item.id, {price: +e.target.value || 0})}/></div></div>}
+        <select className="kf-li-tech" value={item.technicianId || ''} onChange={e => onUpdate(item.id, {technicianId: e.target.value})}><option value="">Assign...</option>{users.filter(u => u.role === 'technician' || u.role === 'tech' || u.role === 'admin' || u.role === 'master_admin').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+        <div className="kf-li-total">${total.toFixed(2)}</div>
+        <button className={`kf-li-notes-btn${showNotes ? ' active' : ''}${(item.customerNote || item.internalNote) ? ' has-notes' : ''}`} title="Add notes" onClick={() => setShowNotes(s => !s)}><MessageSquare size={13}/></button>
+        <button className="kf-li-delete" onClick={() => onDelete(item.id)}><Trash2 size={14}/></button>
+      </div>
+      {showNotes && (
+        <div className="kf-li-notes-panel">
+          <div className="kf-li-note-row">
+            <label><Eye size={12}/> Customer Note <span className="kf-note-hint">Visible on estimate/invoice</span></label>
+            <textarea rows={2} value={item.customerNote || ''} onChange={e => onUpdate(item.id, {customerNote: e.target.value})} placeholder="e.g. Programming BCM module, VIN: WD... — replaced with OEM unit"/>
+          </div>
+          <div className="kf-li-note-row internal">
+            <label><EyeOff size={12}/> Internal Note <span className="kf-note-hint">Shop only — never printed</span></label>
+            <textarea rows={2} value={item.internalNote || ''} onChange={e => onUpdate(item.id, {internalNote: e.target.value})} placeholder="e.g. Labor came out lower than quoted, verify billing..."/>
           </div>
         </div>
       )}
-      {item.type === 'part' && <div className="kf-li-fields"><div className="kf-field"><label>Qty</label><input type="number" min="1" value={item.quantity || 1} onChange={e => onUpdate(item.id, {quantity: +e.target.value || 1})}/></div><div className="kf-field"><label>Cost</label><input type="number" step="0.01" value={item.cost || ''} onChange={e => onUpdate(item.id, {cost: +e.target.value || 0})}/></div></div>}
-      {item.type === 'fee' && <div className="kf-li-fields"><div className="kf-field"><label>Amt</label><input type="number" step="0.01" value={item.price || ''} onChange={e => onUpdate(item.id, {price: +e.target.value || 0})}/></div></div>}
-      <select className="kf-li-tech" value={item.technicianId || ''} onChange={e => onUpdate(item.id, {technicianId: e.target.value})}><option value="">Assign...</option>{users.filter(u => u.role === 'tech' || u.role === 'admin').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-      <div className="kf-li-total">${total.toFixed(2)}</div>
-      <button className="kf-li-delete" onClick={() => onDelete(item.id)}><Trash2 size={14}/></button>
     </div>
   );
 }
