@@ -1440,3 +1440,88 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
 }
 .kf-canned-cat-group .kf-canned-result:last-child { border-bottom: none; }
 .kf-canned-cat-group .kf-canned-result:hover { background: rgba(230,57,70,0.12); }
+
+/* ===== Line Item Notes ===== */
+.kf-line-item-wrap {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255,255,255,0.02);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.kf-line-item-wrap .kf-line-item {
+  background: transparent;
+  border-radius: 0;
+}
+.kf-li-notes-btn {
+  padding: 5px;
+  border-radius: 4px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.kf-li-notes-btn:hover, .kf-li-notes-btn.active { color: var(--text); background: rgba(255,255,255,0.08); }
+.kf-li-notes-btn.has-notes { color: #60a5fa; }
+.kf-li-notes-btn.has-notes.active { background: rgba(96,165,250,0.12); }
+.kf-li-notes-panel {
+  display: flex;
+  gap: 12px;
+  padding: 10px 16px 14px 16px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  background: rgba(0,0,0,0.15);
+}
+.kf-li-note-row {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.kf-li-note-row label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.kf-li-note-row.internal label { color: #f59e0b; }
+.kf-note-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+.kf-li-note-row textarea {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  color: var(--text);
+  resize: vertical;
+  min-height: 52px;
+  font-family: inherit;
+  line-height: 1.4;
+}
+.kf-li-note-row.internal textarea {
+  border-color: rgba(245,158,11,0.2);
+  background: rgba(245,158,11,0.04);
+}
+.kf-li-note-row textarea:focus {
+  outline: none;
+  border-color: rgba(255,255,255,0.2);
+}
+.kf-li-note-row.internal textarea:focus {
+  border-color: rgba(245,158,11,0.4);
+}
+.kf-li-customer-note {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-style: italic;
+  margin-top: 3px;
+}
