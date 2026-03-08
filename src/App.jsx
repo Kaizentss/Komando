@@ -996,7 +996,7 @@ function CannedItemsView({cannedItems, setCannedItems, settings, notify}) {
   const [expandedCats, setExpandedCats] = useState({});
   const [newItem, setNewItem] = useState({
     name: '', description: '', type: 'labor', categoryId: '',
-    hours: 1, rate: 0, quantity: 1, cost: 0, price: 0, notes: ''
+    hours: 0, rate: settings.laborRate, quantity: 1, cost: 0, price: 0, notes: ''
   });
 
   const categories = cannedItems.categories || [];
@@ -1024,7 +1024,7 @@ function CannedItemsView({cannedItems, setCannedItems, settings, notify}) {
     if (!newItem.name.trim() || !newItem.categoryId) { notify('Name and category required', 'error'); return; }
     const item = { ...newItem, id: `ci${Date.now()}` };
     setCannedItems({ ...cannedItems, items: [...items, item] });
-    setNewItem({ name: '', description: '', type: 'labor', categoryId: newItem.categoryId, hours: 1, rate: settings.laborRate, quantity: 1, cost: 0, price: 0, notes: '' });
+    setNewItem({ name: '', description: '', type: 'labor', categoryId: newItem.categoryId, hours: 0, rate: settings.laborRate, quantity: 1, cost: 0, price: 0, notes: '' });
     setShowAddItem(false);
     notify('Canned item added');
   };
@@ -1136,12 +1136,49 @@ function CannedItemsView({cannedItems, setCannedItems, settings, notify}) {
                   <label><input type="radio" checked={(editingItem?.type || newItem.type) === 'fee'} onChange={() => editingItem ? setEditingItem({...editingItem, type: 'fee'}) : setNewItem({...newItem, type: 'fee'})}/>Fee</label>
                 </div>
               </div>
-              {(editingItem?.type || newItem.type) === 'labor' && (
-                <div className="kf-row">
-                  <div className="kf-form-group"><label>Hours</label><input type="number" step="0.25" value={editingItem?.hours || newItem.hours} onChange={e => editingItem ? setEditingItem({...editingItem, hours: +e.target.value || 0}) : setNewItem({...newItem, hours: +e.target.value || 0})}/></div>
-                  <div className="kf-form-group"><label>Rate ($/hr)</label><input type="number" value={editingItem?.rate || newItem.rate} onChange={e => editingItem ? setEditingItem({...editingItem, rate: +e.target.value || 0}) : setNewItem({...newItem, rate: +e.target.value || 0})}/></div>
-                </div>
-              )}
+              {(editingItem?.type || newItem.type) === 'labor' && (() => {
+                const item = editingItem || newItem;
+                const setItem = editingItem
+                  ? v => setEditingItem({...editingItem, ...v})
+                  : v => setNewItem({...newItem, ...v});
+                const effectiveRate = item.rate || settings.laborRate;
+                const subtotal = +(item.hours * effectiveRate).toFixed(2);
+                return (
+                  <div>
+                    <div className="kf-row" style={{marginBottom:8}}>
+                      <div className="kf-form-group">
+                        <label>Rate ($/hr)</label>
+                        <input type="number" step="0.5" value={item.rate}
+                          onChange={e => {
+                            const rate = +e.target.value || 0;
+                            setItem({rate, hours: rate > 0 && item.hours > 0 ? +(item.hours * rate / (item.rate || rate)).toFixed(4) : item.hours});
+                          }}/>
+                      </div>
+                      <div className="kf-form-group">
+                        <label>Hours</label>
+                        <input type="number" step="0.25" value={item.hours}
+                          onChange={e => setItem({hours: +e.target.value || 0})}/>
+                      </div>
+                    </div>
+                    <div className="kf-subtotal-row">
+                      <div className="kf-form-group">
+                        <label>Subtotal ($) <span className="kf-label-hint">— auto-calculates hours</span></label>
+                        <input type="number" step="0.01" placeholder="Enter dollar amount..."
+                          value={subtotal > 0 ? subtotal : ''}
+                          onChange={e => {
+                            const dollars = +e.target.value || 0;
+                            const rate = effectiveRate || settings.laborRate || 1;
+                            setItem({hours: dollars > 0 ? +(dollars / rate).toFixed(4) : 0});
+                          }}/>
+                      </div>
+                      <div className="kf-subtotal-preview">
+                        <span className="kf-sub">= {item.hours > 0 ? item.hours.toFixed(2) : '0'} hrs × ${effectiveRate}/hr</span>
+                        <strong>${subtotal.toFixed(2)}</strong>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
               {(editingItem?.type || newItem.type) === 'part' && (
                 <div className="kf-row">
                   <div className="kf-form-group"><label>Quantity</label><input type="number" min="1" value={editingItem?.quantity || newItem.quantity} onChange={e => editingItem ? setEditingItem({...editingItem, quantity: +e.target.value || 1}) : setNewItem({...newItem, quantity: +e.target.value || 1})}/></div>
