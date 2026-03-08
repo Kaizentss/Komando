@@ -2303,8 +2303,8 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
                           ref={cannedSearchRef}
                           placeholder="Search canned items..." 
                           value={cannedSearch} 
-                          onChange={e => { setCannedSearch(e.target.value); setShowCannedDropdown(true); }}
-                          onFocus={() => setShowCannedDropdown(true)}
+                          onChange={e => { const v = e.target.value; setCannedSearch(v); setShowCannedDropdown(v.trim().length > 0); }}
+                          onBlur={() => setTimeout(() => setShowCannedDropdown(false), 150)}
                         />
                         {cannedSearch && <button className="kf-clear-search" onClick={() => { setCannedSearch(''); setShowCannedDropdown(false); }}><X size={14}/></button>}
                       </div>
