@@ -1404,3 +1404,39 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
   text-transform: none;
   letter-spacing: 0;
 }
+
+/* ===== Canned Items Category Groups in Dropdown ===== */
+.kf-canned-cat-group {
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.kf-canned-cat-group:last-child { border-bottom: none; }
+.kf-canned-cat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  background: rgba(255,255,255,0.03);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  user-select: none;
+  transition: background 0.1s;
+}
+.kf-canned-cat-header:hover { background: rgba(230,57,70,0.08); }
+.kf-canned-cat-header svg { color: var(--primary); flex-shrink: 0; }
+.kf-canned-cat-count {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.07);
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+.kf-canned-cat-group .kf-canned-result {
+  padding-left: 44px;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  background: rgba(0,0,0,0.15);
+}
+.kf-canned-cat-group .kf-canned-result:last-child { border-bottom: none; }
+.kf-canned-cat-group .kf-canned-result:hover { background: rgba(230,57,70,0.12); }
