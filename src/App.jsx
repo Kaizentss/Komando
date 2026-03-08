@@ -2310,30 +2310,31 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
                       </div>
                       {showCannedDropdown && (
                         <div className="kf-canned-dropdown">
-                          {filteredCannedItems.length === 0 ? (
-                            <div className="kf-canned-empty">{cannedSearch ? 'No matching canned items' : 'No canned items yet'}</div>
-                          ) : (
-                            filteredCannedItems.map(item => (
-                              <div key={item.id} className="kf-canned-result" onClick={() => addCannedItem(item)}>
-                                <div className="kf-cr-icon">
-                                  {item.type === 'labor' ? <Clock size={14}/> : item.type === 'part' ? <Package size={14}/> : <Tag size={14}/>}
-                                </div>
-                                <div className="kf-cr-info">
-                                  <div className="kf-cr-name">{item.name}</div>
-                                  <div className="kf-cr-meta">
-                                    <span className="kf-cr-cat">{getCategoryName(item.categoryId)}</span>
-                                    <span className="kf-cr-price">
-                                      {item.type === 'labor' && `${item.hours}h × $${item.rate}`}
-                                      {item.type === 'part' && `${item.quantity} × $${item.cost}`}
-                                      {item.type === 'fee' && `$${item.price}`}
-                                    </span>
+                          <div className="kf-canned-dropdown-list">
+                            {filteredCannedItems.length === 0 ? (
+                              <div className="kf-canned-empty">{cannedSearch ? 'No items match your search' : 'No canned items yet'}</div>
+                            ) : (
+                              filteredCannedItems.map(item => (
+                                <div key={item.id} className="kf-canned-result" onMouseDown={e => { e.preventDefault(); addCannedItem(item); setCannedSearch(''); setShowCannedDropdown(false); }}>
+                                  <div className={`kf-cr-icon ${item.type}`}>
+                                    {item.type === 'labor' ? <Clock size={15}/> : item.type === 'part' ? <Package size={15}/> : <Tag size={15}/>}
                                   </div>
+                                  <div className="kf-cr-info">
+                                    <div className="kf-cr-name">{item.name}</div>
+                                    <div className="kf-cr-meta">
+                                      <span className="kf-cr-cat">{getCategoryName(item.categoryId)}</span>
+                                      <span className="kf-cr-price">
+                                        {item.type === 'labor' && `${item.hours}h × $${item.rate || settings.laborRate}/hr`}
+                                        {item.type === 'part' && `qty ${item.quantity} · $${item.cost} ea`}
+                                        {item.type === 'fee' && `flat $${item.price}`}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="kf-cr-add"><Plus size={14}/></div>
                                 </div>
-                                <Plus size={16} className="kf-cr-add"/>
-                              </div>
-                            ))
-                          )}
-                          <div className="kf-canned-dropdown-footer" onClick={() => setShowCannedDropdown(false)}>Click to close</div>
+                              ))
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
