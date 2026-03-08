@@ -911,7 +911,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
     <div className="kf-settings">
       <div className="kf-settings-tabs">
         <button className={tab==='general'?'active':''} onClick={()=>setTab('general')}><SlidersHorizontal size={16}/>General</button>
-        {isMaster&&<button className={tab==='locations'?'active':''} onClick={()=>setTab('locations')}><MapPin size={16}/>Locations</button>}
+        {isAdmin&&<button className={tab==='locations'?'active':''} onClick={()=>setTab('locations')}><MapPin size={16}/>Locations</button>}
         <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}><Users size={16}/>Users</button>
         {isMaster&&<button className={tab==='backup'?'active':''} onClick={()=>setTab('backup')}><Database size={16}/>Backup</button>}
       </div>
@@ -923,12 +923,14 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
             <div className="kf-form-group"><label>Shop Name</label><input value={localSettings.shopName} onChange={e=>setLocalSettings({...localSettings,shopName:e.target.value})}/></div>
             <div className="kf-form-group"><label>Phone</label><input value={localSettings.phone} onChange={e=>setLocalSettings({...localSettings,phone:e.target.value})}/></div>
             <div className="kf-form-group"><label>Email</label><input value={localSettings.email||''} onChange={e=>setLocalSettings({...localSettings,email:e.target.value})}/></div>
+            <div className="kf-form-group"><label>Default Labor Rate ($/hr)</label><input type="number" step="0.5" value={localSettings.laborRate} onChange={e=>setLocalSettings({...localSettings,laborRate:parseFloat(e.target.value)||0})}/></div>
+            <div className="kf-form-group"><label>Default Tax Rate (%)</label><input type="number" step="0.1" value={localSettings.taxRate} onChange={e=>setLocalSettings({...localSettings,taxRate:parseFloat(e.target.value)||0})}/></div>
           </div>
           <button className="kf-btn primary" style={{marginTop:8}} onClick={saveSettings}><Save size={16}/>Save</button>
         </div>
       )}
 
-      {tab==='locations'&&isMaster&&(
+      {tab==='locations'&&isAdmin&&(
         <div className="kf-card wide">
           <div className="kf-section-header"><h3><MapPin size={20}/> Locations</h3><button className="kf-btn primary sm" onClick={()=>setShowAddLoc(true)}><Plus size={14}/>Add</button></div>
           {showAddLoc&&(
