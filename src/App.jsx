@@ -204,6 +204,7 @@ function SuperAdminConsole({ onExit }) {
   };
 
   const [editingMaster, setEditingMaster] = useState(null); // {cid, userId, name, email, password:''}
+  const [repairingMaster, setRepairingMaster] = useState(null); // {cid, name:'', password:'', email:''}
 
   const openEditMaster = async (c) => {
     try {
@@ -215,6 +216,18 @@ function SuperAdminConsole({ onExit }) {
         else notify('Master admin not found', 'error');
       }
     } catch { notify('Failed to load', 'error'); }
+  };
+
+  const doRepairMaster = async () => {
+    if (!repairingMaster.name || !repairingMaster.password) { notify('Name and password required', 'error'); return; }
+    try {
+      const res = await fetch(`${API_URL}/api/superadmin/companies/${repairingMaster.cid}/repair-master`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({name: repairingMaster.name, password: repairingMaster.password, email: repairingMaster.email})
+      });
+      if (res.ok) { notify('Master admin restored!'); setRepairingMaster(null); fetchCompanies(); }
+      else { const e = await res.json(); notify(e.detail || 'Failed', 'error'); }
+    } catch { notify('Network error', 'error'); }
   };
 
   const saveMaster = async () => {
@@ -317,6 +330,7 @@ function SuperAdminConsole({ onExit }) {
                       </div>
                       <div className="kf-sa-co-actions">
                         <button className="kf-btn secondary sm" onClick={()=>openEditMaster(c)} title="Edit master admin"><Edit2 size={14}/>Master Admin</button>
+                        <button className="kf-btn danger sm" onClick={()=>setRepairingMaster({cid:c.id,name:'',password:'',email:''})} title="Restore lost master admin"><UserCog size={14}/>Restore Login</button>
                         <button className="kf-btn secondary sm" onClick={()=>backupCompany(c.id)}><Download size={14}/>Backup</button>
                         <button className={`kf-btn sm ${c.suspended?'success':'secondary'}`} onClick={()=>toggleSuspend(c)}><PowerOff size={14}/>{c.suspended?'Unsuspend':'Suspend'}</button>
                         <button className="kf-btn danger sm" onClick={()=>deleteCompany(c)}><Trash2 size={14}/>Delete</button>
@@ -329,6 +343,23 @@ function SuperAdminConsole({ onExit }) {
           </>
         )}
 
+        {repairingMaster && (
+          <div className="kf-overlay" onClick={()=>setRepairingMaster(null)}>
+            <div className="kf-modal" onClick={e=>e.stopPropagation()}>
+              <div className="kf-modal-header"><h2><UserCog size={18}/> Restore Master Admin</h2><button className="kf-close" onClick={()=>setRepairingMaster(null)}><X size={20}/></button></div>
+              <div className="kf-modal-body">
+                <p className="kf-sub" style={{marginBottom:16}}>This will create a new master admin login for <strong>{repairingMaster.cid}</strong>. Any existing master admin will be replaced.</p>
+                <div className="kf-form-group"><label>Name *</label><input value={repairingMaster.name} onChange={e=>setRepairingMaster({...repairingMaster,name:e.target.value})} placeholder="e.g. KaizenGR"/></div>
+                <div className="kf-form-group"><label>Email</label><input type="email" value={repairingMaster.email} onChange={e=>setRepairingMaster({...repairingMaster,email:e.target.value})} placeholder="optional"/></div>
+                <div className="kf-form-group"><label>Password *</label><input type="password" value={repairingMaster.password} onChange={e=>setRepairingMaster({...repairingMaster,password:e.target.value})} placeholder="New login password"/></div>
+              </div>
+              <div className="kf-modal-footer">
+                <button className="kf-btn secondary" onClick={()=>setRepairingMaster(null)}>Cancel</button>
+                <button className="kf-btn primary" onClick={doRepairMaster}><Save size={16}/>Restore</button>
+              </div>
+            </div>
+          </div>
+        )}
         {editingMaster && (
           <div className="kf-overlay" onClick={()=>setEditingMaster(null)}>
             <div className="kf-modal" onClick={e=>e.stopPropagation()}>
