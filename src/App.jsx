@@ -752,7 +752,7 @@ export default function App() {
 function Dashboard({stats,estimates,invoices,customers,getName,onSelectEstimate}) {
   return <div>
     <div className="kf-stats">{[{icon:Users,label:'Customers',value:stats.customers,color:'#E63946'},{icon:FileText,label:'Pending',value:stats.pending,color:'#E9C46A'},{icon:DollarSign,label:'Unpaid',value:stats.unpaid,color:'#457B9D'},{icon:BarChart3,label:'Revenue',value:`$${stats.revenue.toLocaleString()}`,color:'#2D936C'}].map((s,i)=><div key={i} className="kf-stat"><div className="kf-stat-icon" style={{background:`${s.color}22`,color:s.color}}><s.icon size={24}/></div><div><div className="kf-stat-label">{s.label}</div><div className="kf-stat-value">{s.value}</div></div></div>)}</div>
-    <div className="kf-grid"><div className="kf-card"><h3>Recent Estimates</h3>{estimates.slice(-5).reverse().map(e=><div key={e.id} className="kf-card-row clickable" onClick={()=>onSelectEstimate(e)}><span>{e.number}</span><span>{e.title||getName(customers.find(c=>c.id===e.customerId))||'No customer'}</span><span>${(e.finalTotal||e.total||0).toFixed(2)}</span><span className={`kf-badge ${e.status}`}>{e.status}</span></div>)}{estimates.length===0&&<div className="kf-empty-sm">No estimates</div>}</div><div className="kf-card"><h3>Unpaid Invoices</h3>{invoices.filter(i=>i.status!=='paid').slice(0,5).map(i=><div key={i.id} className="kf-card-row"><span>{i.number}</span><span>{getName(customers.find(c=>c.id===i.customerId))}</span><span className="red">${i.balance.toFixed(2)}</span></div>)}{invoices.filter(i=>i.status!=='paid').length===0&&<div className="kf-empty-sm"><CheckCircle size={20}/>All paid!</div>}</div></div>
+    <div className="kf-grid"><div className="kf-card"><h3>Recent Estimates</h3>{estimates.slice(-5).reverse().map(e=><div key={e.id} className="kf-card-row clickable" onClick={()=>onSelectEstimate(e)}><span>{e.number}</span><span>{e.title||getName(customers.find(c=>c.id===e.customerId))||'No customer'}</span><span>${(e.finalTotal||e.total||0).toFixed(2)}</span><span className={`kf-badge ${e.status}`}>{e.status}</span></div>)}{estimates.length===0&&<div className="kf-empty-sm">No estimates</div>}</div><div className="kf-card"><h3>Unpaid Invoices</h3>{invoices.filter(i=>i.status!=='paid').slice(0,5).map(i=><div key={i.id} className="kf-card-row"><span>{i.number}</span><span>{getName(customers.find(c=>c.id===i.customerId))}</span><span className="red">${(i.balance||0).toFixed(2)}</span></div>)}{invoices.filter(i=>i.status!=='paid').length===0&&<div className="kf-empty-sm"><CheckCircle size={20}/>All paid!</div>}</div></div>
   </div>;
 }
 
@@ -823,8 +823,8 @@ function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete}) 
               <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number}</strong></td>
               <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>{getName(c)}</td>
               {showLoc&&<td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}
-              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>${(i.finalTotal||i.total).toFixed(2)}</td>
-              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className={i.balance>0?'red':'green'}>${i.balance.toFixed(2)}</td>
+              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>${(i.finalTotal||i.total||0).toFixed(2)}</td>
+              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className={i.balance>0?'red':'green'}>${(i.balance||0).toFixed(2)}</td>
               <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className={`kf-badge ${i.status}`}>{i.status}</span></td>
               <td><button className="kf-icon-btn danger" onClick={ev=>{ev.stopPropagation();onDelete(i);}} title="Delete"><Trash2 size={15}/></button></td>
             </tr>
@@ -1031,11 +1031,11 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
           createdAt: order.date,
           convertedAt: order.date,
           items: order.items,
-          subtotal: order.total,
+          subtotal: parseFloat(order.total)||0,
           tax: 0,
-          finalTotal: order.total,
+          finalTotal: parseFloat(order.total)||0,
           balance: 0,
-          payments: [{amount: order.total, method: 'imported', date: order.date}],
+          payments: [{amount: parseFloat(order.total)||0, method: 'imported', date: order.date||''}],
           notes: `Imported from Shopmonkey. Vehicle: ${order.vehicleStr}`,
         });
         existingNums.add(order.orderNum);
@@ -1621,7 +1621,7 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
     }).join('');
 
     const paymentsHtml = (invoice.payments || []).map(p => 
-      `<tr class="payment"><td colspan="3">${p.date} - Payment (${p.method})</td><td style="text-align:right;color:green">-$${p.amount.toFixed(2)}</td></tr>`
+      `<tr class="payment"><td colspan="3">${p.date} - Payment (${p.method})</td><td style="text-align:right;color:green">-$${(p.amount||0).toFixed(2)}</td></tr>`
     ).join('');
 
     // Build itemsHtml grouped by description (no grouping key yet, just render as service blocks)
@@ -1635,7 +1635,7 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
         <table class="payments-table">
           <thead><tr><th>Date</th><th>Method</th><th style="text-align:right">Amount</th></tr></thead>
           <tbody>
-            ${(invoice.payments||[]).map(p=>`<tr><td>${p.date}</td><td style="text-transform:capitalize">${p.method}</td><td style="text-align:right">$${p.amount.toFixed(2)}</td></tr>`).join('')}
+            ${(invoice.payments||[]).map(p=>`<tr><td>${p.date}</td><td style="text-transform:capitalize">${p.method}</td><td style="text-align:right">$${(p.amount||0).toFixed(2)}</td></tr>`).join('')}
             <tr class="pay-total"><td colspan="2"><strong>Total Payments</strong></td><td style="text-align:right"><strong>$${(invoice.payments||[]).reduce((s,p)=>s+p.amount,0).toFixed(2)}</strong></td></tr>
           </tbody>
         </table>
@@ -1688,7 +1688,7 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
           .total-row { display: flex; justify-content: space-between; padding: 8px 14px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
           .total-row:last-child { border-bottom: none; }
           .total-row.grand { font-size: 15px; font-weight: bold; background: #f0f0f0; }
-          .total-row.balance-row { font-size: 14px; font-weight: bold; color: ${invoice.balance > 0 ? '#c0392b' : '#27ae60'}; }
+          .total-row.balance-row { font-size: 14px; font-weight: bold; color: ${((invoice.balance||0) > 0) ? '#c0392b' : '#27ae60'}; }
           /* Warranty */
           .warranty { border: 1px solid #ddd; border-radius: 4px; padding: 14px 18px; margin-bottom: 24px; font-size: 11px; color: #555; line-height: 1.6; }
           .warranty-title { font-weight: bold; font-size: 12px; color: #333; margin-bottom: 8px; }
@@ -1808,7 +1808,7 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
             ${customer?.taxExempt ? `<div class="total-row"><span>Tax</span><span>$0.00</span></div>` : `<div class="total-row"><span>Tax (${invoice.taxRate||settings.taxRate}%)</span><span>$${tax.toFixed(2)}</span></div>`}
             <div class="total-row grand"><span>Grand Total</span><span>$${finalTotal.toFixed(2)}</span></div>
             ${(invoice.payments||[]).length > 0 ? `<div class="total-row"><span>Paid to Date</span><span>($${(invoice.payments||[]).reduce((s,p)=>s+p.amount,0).toFixed(2)})</span></div>` : ''}
-            <div class="total-row balance-row"><span>REMAINING BALANCE</span><span>$${invoice.balance.toFixed(2)}</span></div>
+            <div class="total-row balance-row"><span>REMAINING BALANCE</span><span>$${(invoice.balance||0).toFixed(2)}</span></div>
           </div>
         </div>
 
@@ -1843,7 +1843,7 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
 
   const canRevert = invoice.status === 'unpaid' && (!invoice.payments || invoice.payments.length === 0);
 
-  return <div className="kf-overlay" onClick={onClose}><div className="kf-modal" onClick={e=>e.stopPropagation()}><div className="kf-modal-header"><h2>{invoice.number}</h2><button className="kf-close" onClick={onClose}><X size={20}/></button></div><div className="kf-modal-body"><div className="kf-detail-header"><span className={`kf-badge ${invoice.status}`}>{invoice.status}</span><span className="kf-sub">Due: {invoice.dueAt}</span><button className="kf-btn secondary sm" onClick={handlePrintInvoice}><Printer size={14}/>Print</button>{invoice.status!=='paid'&&<button className="kf-btn success sm" onClick={()=>setShowPay(true)}><CreditCard size={14}/>Pay</button>}</div>{showPay&&<div className="kf-pay-form"><div className="kf-pay-methods">{['card','cash','check'].map(m=><div key={m} className={method===m?'active':''} onClick={()=>setMethod(m)}>{m==='card'?<CreditCard size={20}/>:<DollarSign size={20}/>}<span>{m}</span></div>)}</div><div className="kf-form-group"><label>Amount</label><input type="number" value={amt} onChange={e=>setAmt(+e.target.value||0)}/></div><div className="kf-row"><button className="kf-btn secondary" onClick={()=>setShowPay(false)}>Cancel</button><button className="kf-btn success" onClick={()=>{onPay({amount:amt,method,date:new Date().toISOString().split('T')[0]});setShowPay(false);}}><CheckCircle size={14}/>Confirm</button></div></div>}<p><strong>Customer:</strong> {getName(customer)}</p>{vehicle && <p><strong>Vehicle:</strong> {vehicle.year} {vehicle.make} {vehicle.model}</p>}{invoice.estimateNumber && <p className="kf-sub">From: {invoice.estimateNumber}</p>}<div className="kf-totals" style={{marginTop:16}}><div><span>Total</span><span>${(invoice.finalTotal||invoice.total).toFixed(2)}</span></div>{invoice.payments?.map((p,i)=><div key={i} className="green"><span>{p.date} ({p.method})</span><span>-${p.amount.toFixed(2)}</span></div>)}<div className="total"><span>Balance</span><span className={invoice.balance>0?'red':'green'}>${invoice.balance.toFixed(2)}</span></div></div></div><div className="kf-modal-footer">{canRevert && <button className="kf-btn secondary" onClick={() => { if(confirm('Revert to estimate? Invoice will be deleted.')) onRevert(); }}><ArrowLeft size={14}/>Revert to Estimate</button>}<button className="kf-btn secondary" onClick={onClose}>Close</button></div></div></div>;
+  return <div className="kf-overlay" onClick={onClose}><div className="kf-modal" onClick={e=>e.stopPropagation()}><div className="kf-modal-header"><h2>{invoice.number}</h2><button className="kf-close" onClick={onClose}><X size={20}/></button></div><div className="kf-modal-body"><div className="kf-detail-header"><span className={`kf-badge ${invoice.status}`}>{invoice.status}</span><span className="kf-sub">Due: {invoice.dueAt}</span><button className="kf-btn secondary sm" onClick={handlePrintInvoice}><Printer size={14}/>Print</button>{invoice.status!=='paid'&&<button className="kf-btn success sm" onClick={()=>setShowPay(true)}><CreditCard size={14}/>Pay</button>}</div>{showPay&&<div className="kf-pay-form"><div className="kf-pay-methods">{['card','cash','check'].map(m=><div key={m} className={method===m?'active':''} onClick={()=>setMethod(m)}>{m==='card'?<CreditCard size={20}/>:<DollarSign size={20}/>}<span>{m}</span></div>)}</div><div className="kf-form-group"><label>Amount</label><input type="number" value={amt} onChange={e=>setAmt(+e.target.value||0)}/></div><div className="kf-row"><button className="kf-btn secondary" onClick={()=>setShowPay(false)}>Cancel</button><button className="kf-btn success" onClick={()=>{onPay({amount:amt,method,date:new Date().toISOString().split('T')[0]});setShowPay(false);}}><CheckCircle size={14}/>Confirm</button></div></div>}<p><strong>Customer:</strong> {getName(customer)}</p>{vehicle && <p><strong>Vehicle:</strong> {vehicle.year} {vehicle.make} {vehicle.model}</p>}{invoice.estimateNumber && <p className="kf-sub">From: {invoice.estimateNumber}</p>}<div className="kf-totals" style={{marginTop:16}}><div><span>Total</span><span>${(invoice.finalTotal||invoice.total||0).toFixed(2)}</span></div>{invoice.payments?.map((p,i)=><div key={i} className="green"><span>{p.date} ({p.method})</span><span>-${(p.amount||0).toFixed(2)}</span></div>)}<div className="total"><span>Balance</span><span className={invoice.balance>0?'red':'green'}>${(invoice.balance||0).toFixed(2)}</span></div></div></div><div className="kf-modal-footer">{canRevert && <button className="kf-btn secondary" onClick={() => { if(confirm('Revert to estimate? Invoice will be deleted.')) onRevert(); }}><ArrowLeft size={14}/>Revert to Estimate</button>}<button className="kf-btn secondary" onClick={onClose}>Close</button></div></div></div>;
 }
 
 // Customer/Vehicle selector component for estimate page
@@ -2811,7 +2811,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
                 <div className="kf-summary-divider"/>
                 <h4>Payments</h4>
                 {(doc.payments || []).map((p, i) => (
-                  <div key={i} className="kf-summary-row green"><span>{p.date} ({p.method})</span><span>-${p.amount.toFixed(2)}</span></div>
+                  <div key={i} className="kf-summary-row green"><span>{p.date} ({p.method})</span><span>-${(p.amount||0).toFixed(2)}</span></div>
                 ))}
                 <div className="kf-summary-row total"><span>Balance</span><span className={balance > 0 ? 'red' : 'green'}>${balance.toFixed(2)}</span></div>
               </>
