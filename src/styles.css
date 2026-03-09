@@ -1686,3 +1686,94 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
   color: var(--text-dim);
 }
 .kf-row-selected td { background: rgba(230,57,70,0.06); }
+
+/* ===== Invoices — Customer Picker ===== */
+.kf-inv-pick-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.kf-inv-pick-header h2 { margin: 0; font-size: 1.4rem; }
+.kf-inv-pick-header .kf-search-input {
+  margin-left: auto;
+  width: 240px;
+  padding: 7px 12px;
+  font-size: 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+}
+.kf-inv-customer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.kf-inv-customer-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+}
+.kf-inv-customer-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(230,57,70,0.12);
+}
+.kf-inv-customer-card.unlinked {
+  border-style: dashed;
+  border-color: #f39c12;
+  opacity: 0.85;
+}
+.kf-inv-card-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kf-inv-card-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+}
+.kf-inv-card-total {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ===== Invoices — List Header ===== */
+.kf-inv-list-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.kf-inv-list-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 1.1rem;
+}
+.kf-inv-list-stats {
+  margin-left: auto;
+  display: flex;
+  gap: 16px;
+  font-size: 0.85rem;
+}
+
+/* ===== Sort toggle button ===== */
+.kf-sort-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
