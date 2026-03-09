@@ -4,7 +4,7 @@ import {
   Settings, ChevronRight, Building2, Wrench, CheckCircle, AlertCircle, 
   X, Save, CreditCard, Home, BarChart3, Trash2, Zap, Loader2, Send,
   Edit2, UserCog, Clock, Package, Tag, Upload, Image, File, Video,
-  StickyNote, Eye, EyeOff, Camera, LogOut, Lock, User, ArrowLeft, ArrowUp, ArrowDown,
+  StickyNote, Eye, EyeOff, Camera, LogOut, Lock, User, ArrowLeft, ArrowUp, ArrowDown, Archive, ArchiveRestore,
   Clipboard, ChevronDown, CircleDot, Printer, Layers, FolderPlus, ChevronUp,
   MapPin, Shield, SlidersHorizontal, Globe, Database, Download, RefreshCw,
   PowerOff, Key, AlertTriangle
@@ -599,8 +599,8 @@ export default function App() {
   const getLocation = id => locations.find(l=>l.id===id) || null;
   const getEffectiveSettings = locationId => resolveSettings(settings, getLocation(locationId));
   const activeLocationId = locationFilter;
-  const filteredEstimates = activeLocationId ? estimates.filter(e=>e.locationId===activeLocationId) : estimates;
-  const filteredInvoices  = activeLocationId ? invoices.filter(i=>i.locationId===activeLocationId)  : invoices;
+  const filteredEstimates = (activeLocationId ? estimates.filter(e=>e.locationId===activeLocationId) : estimates).filter(e=>!e.archived);
+  const filteredInvoices  = (activeLocationId ? invoices.filter(i=>i.locationId===activeLocationId)  : invoices).filter(i=>!i.archived);
 
   const stats = {
     customers: customers.length,
@@ -732,8 +732,8 @@ export default function App() {
           {view==='dashboard'  && <Dashboard stats={stats} estimates={filteredEstimates} invoices={filteredInvoices} customers={sorted} getName={getName} onSelectEstimate={e=>setEditingEstimate(e)}/>}
           {view==='customers'  && <CustomersList customers={sorted} vehicles={vehicles} getName={getName} search={search} onSelect={c=>{setSelected(c);setModal('custDetail');}} onAdd={()=>setModal('custAdd')}/>}
           {view==='vehicles'   && <VehiclesList vehicles={vehicles} customers={sorted} getName={getName} search={search} onAdd={()=>setModal('vehAdd')}/>}
-          {view==='estimates'  && <EstimatesList estimates={filteredEstimates} customers={sorted} vehicles={vehicles} locations={locations} getName={getName} onSelect={e=>setEditingEstimate(e)} onCreate={handleNewEstimate} onDelete={e=>{if(confirm(`Delete ${e.number}? This cannot be undone.`)){setEstimates(estimates.filter(x=>x.id!==e.id));notify('Estimate deleted');}}}/>}
-          {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)} onDelete={i=>{if(confirm(`Delete ${i.number}? This cannot be undone.`)){setInvoices(invoices.filter(x=>x.id!==i.id));notify('Invoice deleted');}}} onBulkDelete={ids=>{setInvoices(invoices.filter(x=>!ids.includes(x.id)));notify(`${ids.length} invoices deleted`);}}/>}
+          {view==='estimates'  && <EstimatesList estimates={filteredEstimates} customers={sorted} vehicles={vehicles} locations={locations} getName={getName} onSelect={e=>setEditingEstimate(e)} onCreate={handleNewEstimate} onDelete={e=>{if(confirm(`Delete ${e.number}? This cannot be undone.`)){setEstimates(estimates.filter(x=>x.id!==e.id));notify('Estimate deleted');}}} onArchive={e=>{setEstimates(estimates.map(x=>x.id===e.id?{...x,archived:!x.archived}:x));notify(e.archived?'Estimate unarchived':'Estimate archived');}}/>}
+          {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)} onDelete={i=>{if(confirm(`Delete ${i.number}? This cannot be undone.`)){setInvoices(invoices.filter(x=>x.id!==i.id));notify('Invoice deleted');}}} onBulkDelete={ids=>{setInvoices(invoices.filter(x=>!ids.includes(x.id)));notify(`${ids.length} invoices deleted`);}} onArchive={(ids,archive)=>{setInvoices(invoices.map(x=>ids.includes(x.id)?{...x,archived:archive}:x));notify(`${ids.length} invoice${ids.length>1?'s':''} ${archive?'archived':'unarchived'}`);}}/>}
           {view==='canned'     && <CannedItemsView cannedItems={cannedItems} setCannedItems={setCannedItems} settings={settings} notify={notify}/>}
           {view==='messages'   && <MessagesView/>}
           {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
@@ -853,25 +853,42 @@ function VehiclesList({vehicles,customers,getName,search,onAdd}) {
   return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onAdd}><Plus size={16}/>Add</button></div><div className="kf-card"><table><thead><tr><th>Vehicle</th><th>VIN</th><th>Plate</th><th>Owner</th></tr></thead><tbody>{list.map(v=><tr key={v.id}><td>{v.year} {v.make} {v.model}</td><td><code>{v.vin?.slice(-8)}</code></td><td>{v.plate}</td><td>{getName(customers.find(c=>c.id===v.customerId))}</td></tr>)}</tbody></table>{list.length===0&&<div className="kf-empty"><Car size={40}/></div>}</div></div>;
 }
 
-function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,onCreate,onDelete}) {
+function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,onCreate,onDelete,onArchive}) {
   const [filter,setFilter]=useState('all');
-  const list=estimates.filter(e=>filter==='all'||e.status===filter);
+  const [showArchived,setShowArchived]=useState(false);
+  const active   = estimates.filter(e => !e.archived);
+  const archived = estimates.filter(e =>  e.archived);
+  const pool = showArchived ? archived : active;
+  const list = pool.filter(e => filter==='all' || e.status===filter);
   const getLocName=id=>locations?.find(l=>l.id===id)?.name||'';
   const showLoc=locations?.length>1;
   return (
     <div>
       <div className="kf-actions">
-        <button className="kf-btn primary" onClick={onCreate}><Zap size={16}/>New</button>
+        {!showArchived && <button className="kf-btn primary" onClick={onCreate}><Zap size={16}/>New</button>}
         <div style={{flex:1}}/>
-        <div className="kf-tabs">{['all','pending','approved','converted'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div>
+        <button
+          className={`kf-btn secondary sm${showArchived?' active':''}`}
+          onClick={()=>{setShowArchived(v=>!v);setFilter('all');}}
+          title={showArchived?'Back to active':'View archived'}
+        >
+          <Archive size={14}/>{showArchived ? 'Active' : `Archived (${archived.length})`}
+        </button>
+        <div className="kf-tabs">
+          {(showArchived
+            ? ['all','pending','approved','converted']
+            : ['all','pending','approved','converted']
+          ).map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}
+        </div>
       </div>
+      {showArchived && <div className="kf-archive-notice"><Archive size={14}/> Showing archived estimates — these are hidden from normal views.</div>}
       <div className="kf-card">
         <table><thead><tr><th>Estimate</th><th>Title</th><th>Customer</th><th>Vehicle</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Status</th><th></th></tr></thead>
         <tbody>{list.map(e=>{
           const c=customers.find(x=>x.id===e.customerId);
           const v=vehicles.find(x=>x.id===e.vehicleId);
           return (
-            <tr key={e.id}>
+            <tr key={e.id} className={e.archived?'kf-row-archived':''}>
               <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}><strong>{e.number}</strong></td>
               <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}>{e.title||'-'}</td>
               <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}>{c?getName(c):'-'}</td>
@@ -879,32 +896,39 @@ function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,
               {showLoc&&<td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(e.locationId)}</span></td>}
               <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}>${(e.finalTotal||0).toFixed(2)}</td>
               <td onClick={()=>onSelect(e)} style={{cursor:'pointer'}}><span className={`kf-badge ${e.status}`}>{e.status}</span></td>
-              <td><button className="kf-icon-btn danger" onClick={ev=>{ev.stopPropagation();onDelete(e);}} title="Delete"><Trash2 size={15}/></button></td>
+              <td style={{display:'flex',gap:4}}>
+                <button className="kf-icon-btn secondary" onClick={ev=>{ev.stopPropagation();onArchive(e);}} title={e.archived?'Unarchive':'Archive'}>{e.archived?<ArchiveRestore size={15}/>:<Archive size={15}/>}</button>
+                <button className="kf-icon-btn danger"    onClick={ev=>{ev.stopPropagation();onDelete(e);}}  title="Delete"><Trash2 size={15}/></button>
+              </td>
             </tr>
           );
         })}</tbody></table>
-        {list.length===0&&<div className="kf-empty"><FileText size={40}/></div>}
+        {list.length===0&&<div className="kf-empty"><FileText size={40}/>{showArchived&&<p>No archived estimates</p>}</div>}
       </div>
     </div>
   );
 }
 
-function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,onBulkDelete}) {
+function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,onBulkDelete,onArchive}) {
   const [pickedId, setPickedId] = useState(null);
-  const [sortDir, setSortDir] = useState('desc'); // desc = highest first
+  const [sortDir, setSortDir] = useState('desc');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selected, setSelected] = useState(new Set());
   const [search, setSearch] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
 
-  // Build customer list — only those who have at least one invoice
-  const customerHasInvoice = new Set(invoices.map(i => i.customerId).filter(Boolean));
+  const activeInvoices   = invoices.filter(i => !i.archived);
+  const archivedInvoices = invoices.filter(i =>  i.archived);
+  const pool = showArchived ? archivedInvoices : activeInvoices;
+
+  const customerHasInvoice = new Set(pool.map(i => i.customerId).filter(Boolean));
   const withInvoices = customers.filter(c => customerHasInvoice.has(c.id));
-  const unlinked = invoices.filter(i => !i.customerId);
+  const unlinked = pool.filter(i => !i.customerId);
 
   const getLocName = id => locations?.find(l => l.id === id)?.name || '';
   const showLoc = locations?.length > 1;
 
-  // ── Customer picker screen ──────────────────────────────────────────────
+  // ── Customer picker ─────────────────────────────────────────
   if (!pickedId) {
     const filtered = search
       ? withInvoices.filter(c => getName(c).toLowerCase().includes(search.toLowerCase()))
@@ -914,145 +938,125 @@ function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,on
       <div>
         <div className="kf-inv-pick-header">
           <h2>Invoices</h2>
-          <input
-            className="kf-search-input"
-            placeholder="Search customers…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+          <input className="kf-search-input" placeholder="Search customers…" value={search} onChange={e=>setSearch(e.target.value)}/>
+          <button
+            className={`kf-btn secondary sm${showArchived?' active':''}`}
+            onClick={()=>{setShowArchived(v=>!v);setSearch('');}}
+          >
+            <Archive size={14}/>{showArchived ? 'Active' : `Archived (${archivedInvoices.length})`}
+          </button>
         </div>
+        {showArchived && <div className="kf-archive-notice"><Archive size={14}/> Showing archived invoices.</div>}
         <div className="kf-inv-customer-grid">
           {sorted.map(c => {
-            const cinvs = invoices.filter(i => i.customerId === c.id);
+            const cinvs = pool.filter(i => i.customerId === c.id);
             const unpaid = cinvs.filter(i => i.status !== 'paid');
-            const total = cinvs.reduce((s,i) => s + (i.finalTotal||i.total||0), 0);
+            const total  = cinvs.reduce((s,i) => s + (i.finalTotal||i.total||0), 0);
             return (
               <div key={c.id} className="kf-inv-customer-card" onClick={() => { setPickedId(c.id); setSelected(new Set()); }}>
                 <div className="kf-inv-card-name">{getName(c)}</div>
                 <div className="kf-inv-card-meta">
-                  <span>{cinvs.length} invoice{cinvs.length !== 1 ? 's' : ''}</span>
-                  {unpaid.length > 0 && <span className="red">{unpaid.length} unpaid</span>}
+                  <span>{cinvs.length} invoice{cinvs.length!==1?'s':''}</span>
+                  {unpaid.length>0&&<span className="red">{unpaid.length} unpaid</span>}
                   <span className="kf-inv-card-total">${total.toFixed(2)}</span>
                 </div>
               </div>
             );
           })}
-          {unlinked.length > 0 && (
-            <div className="kf-inv-customer-card unlinked" onClick={() => { setPickedId('__unlinked__'); setSelected(new Set()); }}>
+          {unlinked.length>0&&(
+            <div className="kf-inv-customer-card unlinked" onClick={()=>{setPickedId('__unlinked__');setSelected(new Set());}}>
               <div className="kf-inv-card-name">⚠ Unlinked Invoices</div>
               <div className="kf-inv-card-meta">
-                <span>{unlinked.length} invoice{unlinked.length !== 1 ? 's' : ''}</span>
+                <span>{unlinked.length} invoice{unlinked.length!==1?'s':''}</span>
                 <span className="kf-sub">No customer assigned</span>
               </div>
             </div>
           )}
-          {sorted.length === 0 && unlinked.length === 0 && (
-            <div className="kf-empty"><DollarSign size={40}/><p>No invoices yet</p></div>
+          {sorted.length===0&&unlinked.length===0&&(
+            <div className="kf-empty"><DollarSign size={40}/><p>{showArchived?'No archived invoices':'No invoices yet'}</p></div>
           )}
         </div>
       </div>
     );
   }
 
-  // ── Invoice list screen ─────────────────────────────────────────────────
-  const customer = pickedId === '__unlinked__' ? null : customers.find(c => c.id === pickedId);
-  const base = pickedId === '__unlinked__'
-    ? invoices.filter(i => !i.customerId)
-    : invoices.filter(i => i.customerId === pickedId);
+  // ── Invoice list ─────────────────────────────────────────────
+  const customer = pickedId==='__unlinked__' ? null : customers.find(c=>c.id===pickedId);
+  const base = (pickedId==='__unlinked__' ? pool.filter(i=>!i.customerId) : pool.filter(i=>i.customerId===pickedId))
+    .filter(i => statusFilter==='all' || i.status===statusFilter);
 
-  const filtered = base.filter(i => statusFilter === 'all' || i.status === statusFilter);
-
-  // Sort by invoice number numerically
-  const parseNum = n => parseInt((n||'').replace(/\D/g,'')) || 0;
-  const list = [...filtered].sort((a,b) =>
-    sortDir === 'asc'
-      ? parseNum(a.number) - parseNum(b.number)
-      : parseNum(b.number) - parseNum(a.number)
+  const parseNum = n => parseInt((n||'').replace(/\D/g,''))||0;
+  const list = [...base].sort((a,b) =>
+    sortDir==='asc' ? parseNum(a.number)-parseNum(b.number) : parseNum(b.number)-parseNum(a.number)
   );
 
-  const allChecked = list.length > 0 && list.every(i => selected.has(i.id));
-  const toggleAll = () => setSelected(allChecked ? new Set() : new Set(list.map(i => i.id)));
-  const toggle = id => setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
-  const handleBulkDelete = () => {
-    if (!selected.size) return;
-    if (!confirm(`Delete ${selected.size} invoice${selected.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
-    onBulkDelete([...selected]);
-    setSelected(new Set());
-  };
+  const allChecked = list.length>0 && list.every(i=>selected.has(i.id));
+  const toggleAll  = () => setSelected(allChecked ? new Set() : new Set(list.map(i=>i.id)));
+  const toggle     = id => setSelected(prev=>{const s=new Set(prev);s.has(id)?s.delete(id):s.add(id);return s;});
+  const handleBulkDelete  = () => { if(!selected.size)return; if(!confirm(`Delete ${selected.size} invoice${selected.size>1?'s':''}?`))return; onBulkDelete([...selected]); setSelected(new Set()); };
+  const handleBulkArchive = () => { if(!selected.size)return; onArchive([...selected], !showArchived); setSelected(new Set()); };
 
-  const grandTotal = list.reduce((s,i) => s + (i.finalTotal||i.total||0), 0);
-  const unpaidTotal = list.filter(i=>i.status!=='paid').reduce((s,i) => s + (i.balance||0), 0);
+  const grandTotal  = list.reduce((s,i)=>s+(i.finalTotal||i.total||0),0);
+  const unpaidTotal = list.filter(i=>i.status!=='paid').reduce((s,i)=>s+(i.balance||0),0);
 
   return (
     <div>
-      {/* Back + header */}
       <div className="kf-inv-list-header">
-        <button className="kf-btn secondary sm" onClick={() => { setPickedId(null); setSelected(new Set()); setSearch(''); }}>
+        <button className="kf-btn secondary sm" onClick={()=>{setPickedId(null);setSelected(new Set());setSearch('');}}>
           <ArrowLeft size={14}/> All Customers
         </button>
         <div className="kf-inv-list-title">
-          <strong>{customer ? getName(customer) : 'Unlinked Invoices'}</strong>
-          <span className="kf-sub">{list.length} invoice{list.length !== 1 ? 's' : ''}</span>
+          <strong>{customer?getName(customer):'Unlinked Invoices'}</strong>
+          <span className="kf-sub">{list.length} invoice{list.length!==1?'s':''}</span>
+          {showArchived && <span className="kf-badge" style={{background:'#b8860b22',color:'#b8860b'}}>Archived</span>}
         </div>
         <div className="kf-inv-list-stats">
           <span>Total: <strong>${grandTotal.toFixed(2)}</strong></span>
-          {unpaidTotal > 0 && <span className="red">Unpaid: <strong>${unpaidTotal.toFixed(2)}</strong></span>}
+          {unpaidTotal>0&&<span className="red">Unpaid: <strong>${unpaidTotal.toFixed(2)}</strong></span>}
         </div>
       </div>
 
-      {/* Toolbar */}
       <div className="kf-actions" style={{marginBottom:8}}>
         <div style={{flex:1}}>
-          {selected.size > 0 ? (
+          {selected.size>0 ? (
             <div className="kf-bulk-bar">
               <span>{selected.size} selected</span>
-              <button className="kf-btn danger sm" onClick={handleBulkDelete}><Trash2 size={14}/>Delete Selected</button>
-              <button className="kf-btn secondary sm" onClick={() => setSelected(new Set())}>Clear</button>
+              <button className="kf-btn secondary sm" onClick={handleBulkArchive}><Archive size={14}/>{showArchived?'Unarchive':'Archive'} Selected</button>
+              <button className="kf-btn danger sm"    onClick={handleBulkDelete}><Trash2 size={14}/>Delete Selected</button>
+              <button className="kf-btn secondary sm" onClick={()=>setSelected(new Set())}>Clear</button>
             </div>
           ) : (
-            <button
-              className="kf-btn secondary sm kf-sort-toggle"
-              onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
-              title="Toggle sort order"
-            >
-              {sortDir === 'desc'
-                ? <><ArrowDown size={14}/> Highest First</>
-                : <><ArrowUp size={14}/> Lowest First</>
-              }
+            <button className="kf-btn secondary sm kf-sort-toggle" onClick={()=>setSortDir(d=>d==='desc'?'asc':'desc')}>
+              {sortDir==='desc'?<><ArrowDown size={14}/> Highest First</>:<><ArrowUp size={14}/> Lowest First</>}
             </button>
           )}
         </div>
         <div className="kf-tabs">
-          {['all','unpaid','partial','paid'].map(f =>
-            <button key={f} className={statusFilter === f ? 'active' : ''} onClick={() => setStatusFilter(f)}>{f}</button>
-          )}
+          {['all','unpaid','partial','paid'].map(f=><button key={f} className={statusFilter===f?'active':''} onClick={()=>setStatusFilter(f)}>{f}</button>)}
         </div>
       </div>
 
       <div className="kf-card">
         <table><thead><tr>
           <th style={{width:36}}><input type="checkbox" checked={allChecked} onChange={toggleAll}/></th>
-          <th>Invoice #</th>
-          {showLoc && <th>Location</th>}
-          <th>Date</th>
-          <th>Total</th>
-          <th>Balance</th>
-          <th>Status</th>
-          <th></th>
+          <th>Invoice #</th>{showLoc&&<th>Location</th>}<th>Date</th><th>Total</th><th>Balance</th><th>Status</th><th></th>
         </tr></thead>
-        <tbody>{list.map(i => (
-          <tr key={i.id} className={selected.has(i.id) ? 'kf-row-selected' : ''}>
-            <td onClick={e => e.stopPropagation()}><input type="checkbox" checked={selected.has(i.id)} onChange={() => toggle(i.id)}/></td>
-            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number}</strong></td>
-            {showLoc && <td onClick={() => onSelect(i)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}
-            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}} className="kf-sub">{i.createdAt?.split('T')[0] || i.convertedAt?.split('T')[0] || '—'}</td>
-            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}}>${(i.finalTotal||i.total||0).toFixed(2)}</td>
-            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}} className={(i.balance||0) > 0 ? 'red' : 'green'}>${(i.balance||0).toFixed(2)}</td>
-            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}}><span className={`kf-badge ${i.status}`}>{i.status}</span></td>
-            <td><button className="kf-icon-btn danger" onClick={ev => { ev.stopPropagation(); onDelete(i); }} title="Delete"><Trash2 size={15}/></button></td>
+        <tbody>{list.map(i=>(
+          <tr key={i.id} className={selected.has(i.id)?'kf-row-selected':i.archived?'kf-row-archived':''}>
+            <td onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selected.has(i.id)} onChange={()=>toggle(i.id)}/></td>
+            <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number}</strong></td>
+            {showLoc&&<td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}
+            <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className="kf-sub">{i.createdAt?.split('T')[0]||i.convertedAt?.split('T')[0]||'—'}</td>
+            <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>${(i.finalTotal||i.total||0).toFixed(2)}</td>
+            <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className={(i.balance||0)>0?'red':'green'}>${(i.balance||0).toFixed(2)}</td>
+            <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className={`kf-badge ${i.status}`}>{i.status}</span></td>
+            <td style={{display:'flex',gap:4}}>
+              <button className="kf-icon-btn secondary" onClick={ev=>{ev.stopPropagation();onArchive([i.id],!i.archived);}} title={i.archived?'Unarchive':'Archive'}>{i.archived?<ArchiveRestore size={15}/>:<Archive size={15}/>}</button>
+              <button className="kf-icon-btn danger"    onClick={ev=>{ev.stopPropagation();onDelete(i);}} title="Delete"><Trash2 size={15}/></button>
+            </td>
           </tr>
         ))}</tbody></table>
-        {list.length === 0 && <div className="kf-empty"><DollarSign size={40}/></div>}
+        {list.length===0&&<div className="kf-empty"><DollarSign size={40}/></div>}
       </div>
     </div>
   );
