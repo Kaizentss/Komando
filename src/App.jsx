@@ -733,7 +733,7 @@ export default function App() {
           {view==='customers'  && <CustomersList customers={sorted} vehicles={vehicles} getName={getName} search={search} onSelect={c=>{setSelected(c);setModal('custDetail');}} onAdd={()=>setModal('custAdd')}/>}
           {view==='vehicles'   && <VehiclesList vehicles={vehicles} customers={sorted} getName={getName} search={search} onAdd={()=>setModal('vehAdd')}/>}
           {view==='estimates'  && <EstimatesList estimates={filteredEstimates} customers={sorted} vehicles={vehicles} locations={locations} getName={getName} onSelect={e=>setEditingEstimate(e)} onCreate={handleNewEstimate} onDelete={e=>{if(confirm(`Delete ${e.number}? This cannot be undone.`)){setEstimates(estimates.filter(x=>x.id!==e.id));notify('Estimate deleted');}}}/>}
-          {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)} onDelete={i=>{if(confirm(`Delete ${i.number}? This cannot be undone.`)){setInvoices(invoices.filter(x=>x.id!==i.id));notify('Invoice deleted');}}}/>}
+          {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)} onDelete={i=>{if(confirm(`Delete ${i.number}? This cannot be undone.`)){setInvoices(invoices.filter(x=>x.id!==i.id));notify('Invoice deleted');}}} onBulkDelete={ids=>{setInvoices(invoices.filter(x=>!ids.includes(x.id)));notify(`${ids.length} invoices deleted`);}}/>}
           {view==='canned'     && <CannedItemsView cannedItems={cannedItems} setCannedItems={setCannedItems} settings={settings} notify={notify}/>}
           {view==='messages'   && <MessagesView/>}
           {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
@@ -803,23 +803,45 @@ function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,
   );
 }
 
-function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete}) {
+function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,onBulkDelete}) {
   const [filter,setFilter]=useState('all');
+  const [selected,setSelected]=useState(new Set());
   const list=invoices.filter(i=>filter==='all'||i.status===filter);
   const getLocName=id=>locations?.find(l=>l.id===id)?.name||'';
   const showLoc=locations?.length>1;
+  const allChecked=list.length>0&&list.every(i=>selected.has(i.id));
+  const toggleAll=()=>setSelected(allChecked?new Set():new Set(list.map(i=>i.id)));
+  const toggle=id=>setSelected(prev=>{const s=new Set(prev);s.has(id)?s.delete(id):s.add(id);return s;});
+  const handleBulkDelete=()=>{
+    if(!selected.size)return;
+    if(!confirm(`Delete ${selected.size} invoice${selected.size>1?'s':''}? This cannot be undone.`))return;
+    onBulkDelete([...selected]);
+    setSelected(new Set());
+  };
   return (
     <div>
       <div className="kf-actions">
-        <div style={{flex:1}}/>
+        <div style={{flex:1}}>
+          {selected.size>0&&(
+            <div className="kf-bulk-bar">
+              <span>{selected.size} selected</span>
+              <button className="kf-btn danger sm" onClick={handleBulkDelete}><Trash2 size={14}/>Delete Selected</button>
+              <button className="kf-btn secondary sm" onClick={()=>setSelected(new Set())}>Clear</button>
+            </div>
+          )}
+        </div>
         <div className="kf-tabs">{['all','unpaid','partial','paid'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div>
       </div>
       <div className="kf-card">
-        <table><thead><tr><th>Invoice</th><th>Customer</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+        <table><thead><tr>
+          <th style={{width:36}}><input type="checkbox" checked={allChecked} onChange={toggleAll}/></th>
+          <th>Invoice</th><th>Customer</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Balance</th><th>Status</th><th></th>
+        </tr></thead>
         <tbody>{list.map(i=>{
           const c=customers.find(x=>x.id===i.customerId);
           return (
-            <tr key={i.id}>
+            <tr key={i.id} className={selected.has(i.id)?'kf-row-selected':''}>
+              <td onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selected.has(i.id)} onChange={()=>toggle(i.id)}/></td>
               <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number}</strong></td>
               <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>{getName(c)}</td>
               {showLoc&&<td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}
