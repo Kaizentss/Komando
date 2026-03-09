@@ -606,7 +606,7 @@ export default function App() {
     customers: customers.length,
     pending: filteredEstimates.filter(e=>e.status==='pending').length,
     unpaid: filteredInvoices.filter(i=>i.status!=='paid').length,
-    revenue: filteredInvoices.filter(i=>i.status==='paid').reduce((s,i)=>s+(i.finalTotal||i.total),0)
+    revenue: filteredInvoices.filter(i=>i.status==='paid').reduce((s,i)=>s+(i.finalTotal||i.total||0),0)
   };
 
   const getNextDocNumber = () => {
@@ -750,10 +750,95 @@ export default function App() {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function Dashboard({stats,estimates,invoices,customers,getName,onSelectEstimate}) {
-  return <div>
-    <div className="kf-stats">{[{icon:Users,label:'Customers',value:stats.customers,color:'#E63946'},{icon:FileText,label:'Pending',value:stats.pending,color:'#E9C46A'},{icon:DollarSign,label:'Unpaid',value:stats.unpaid,color:'#457B9D'},{icon:BarChart3,label:'Revenue',value:`$${stats.revenue.toLocaleString()}`,color:'#2D936C'}].map((s,i)=><div key={i} className="kf-stat"><div className="kf-stat-icon" style={{background:`${s.color}22`,color:s.color}}><s.icon size={24}/></div><div><div className="kf-stat-label">{s.label}</div><div className="kf-stat-value">{s.value}</div></div></div>)}</div>
-    <div className="kf-grid"><div className="kf-card"><h3>Recent Estimates</h3>{estimates.slice(-5).reverse().map(e=><div key={e.id} className="kf-card-row clickable" onClick={()=>onSelectEstimate(e)}><span>{e.number}</span><span>{e.title||getName(customers.find(c=>c.id===e.customerId))||'No customer'}</span><span>${(e.finalTotal||e.total||0).toFixed(2)}</span><span className={`kf-badge ${e.status}`}>{e.status}</span></div>)}{estimates.length===0&&<div className="kf-empty-sm">No estimates</div>}</div><div className="kf-card"><h3>Unpaid Invoices</h3>{invoices.filter(i=>i.status!=='paid').slice(0,5).map(i=><div key={i.id} className="kf-card-row"><span>{i.number}</span><span>{getName(customers.find(c=>c.id===i.customerId))}</span><span className="red">${(i.balance||0).toFixed(2)}</span></div>)}{invoices.filter(i=>i.status!=='paid').length===0&&<div className="kf-empty-sm"><CheckCircle size={20}/>All paid!</div>}</div></div>
-  </div>;
+  const thisYear = new Date().getFullYear();
+  const lastYear = thisYear - 1;
+  const [period, setPeriod] = useState('thisYear'); // 'thisYear' | 'lastYear' | 'custom'
+  const [customStart, setCustomStart] = useState(`${thisYear}-01-01`);
+  const [customEnd, setCustomEnd] = useState(new Date().toISOString().split('T')[0]);
+
+  const getRange = () => {
+    if (period === 'thisYear') return [`${thisYear}-01-01`, `${thisYear}-12-31`];
+    if (period === 'lastYear') return [`${lastYear}-01-01`, `${lastYear}-12-31`];
+    return [customStart, customEnd];
+  };
+  const [rangeStart, rangeEnd] = getRange();
+
+  const inRange = dateStr => {
+    if (!dateStr) return false;
+    const d = dateStr.split('T')[0];
+    return d >= rangeStart && d <= rangeEnd;
+  };
+
+  const rangeInvoices = invoices.filter(i => inRange(i.convertedAt || i.createdAt));
+  const revenue = rangeInvoices.filter(i => i.status === 'paid').reduce((s,i) => s + (i.finalTotal||i.total||0), 0);
+  const invoiceCount = rangeInvoices.length;
+  const unpaidCount = rangeInvoices.filter(i => i.status !== 'paid').length;
+
+  const periodLabel = period === 'thisYear' ? `${thisYear}` : period === 'lastYear' ? `${lastYear}` : `${rangeStart} – ${rangeEnd}`;
+
+  return (
+    <div>
+      {/* Date range toolbar */}
+      <div className="kf-dash-period-bar">
+        <span className="kf-dash-period-label">Period:</span>
+        <div className="kf-tabs">
+          <button className={period==='thisYear'?'active':''} onClick={()=>setPeriod('thisYear')}>{thisYear}</button>
+          <button className={period==='lastYear'?'active':''} onClick={()=>setPeriod('lastYear')}>{lastYear}</button>
+          <button className={period==='custom'?'active':''} onClick={()=>setPeriod('custom')}>Custom</button>
+        </div>
+        {period === 'custom' && (
+          <div className="kf-dash-custom-range">
+            <input type="date" value={customStart} onChange={e=>setCustomStart(e.target.value)}/>
+            <span>–</span>
+            <input type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)}/>
+          </div>
+        )}
+        <span className="kf-sub" style={{marginLeft:'auto'}}>{invoiceCount} invoice{invoiceCount!==1?'s':''} in period</span>
+      </div>
+
+      {/* Stat cards */}
+      <div className="kf-stats">
+        {[
+          {icon:Users,     label:'Customers',  value: stats.customers,                          color:'#E63946'},
+          {icon:FileText,  label:'Pending',     value: stats.pending,                            color:'#E9C46A'},
+          {icon:DollarSign,label:'Unpaid',      value: unpaidCount,                              color:'#457B9D'},
+          {icon:BarChart3, label:`Revenue (${periodLabel})`, value:`$${revenue.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`, color:'#2D936C'},
+        ].map((s,i)=>(
+          <div key={i} className="kf-stat">
+            <div className="kf-stat-icon" style={{background:`${s.color}22`,color:s.color}}><s.icon size={24}/></div>
+            <div><div className="kf-stat-label">{s.label}</div><div className="kf-stat-value">{s.value}</div></div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bottom cards */}
+      <div className="kf-grid">
+        <div className="kf-card">
+          <h3>Recent Estimates</h3>
+          {estimates.slice(-5).reverse().map(e=>(
+            <div key={e.id} className="kf-card-row clickable" onClick={()=>onSelectEstimate(e)}>
+              <span>{e.number}</span>
+              <span>{e.title||getName(customers.find(c=>c.id===e.customerId))||'No customer'}</span>
+              <span>${(e.finalTotal||e.total||0).toFixed(2)}</span>
+              <span className={`kf-badge ${e.status}`}>{e.status}</span>
+            </div>
+          ))}
+          {estimates.length===0&&<div className="kf-empty-sm">No estimates</div>}
+        </div>
+        <div className="kf-card">
+          <h3>Unpaid Invoices</h3>
+          {invoices.filter(i=>i.status!=='paid').slice(0,5).map(i=>(
+            <div key={i.id} className="kf-card-row">
+              <span>{i.number}</span>
+              <span>{getName(customers.find(c=>c.id===i.customerId))}</span>
+              <span className="red">${(i.balance||0).toFixed(2)}</span>
+            </div>
+          ))}
+          {invoices.filter(i=>i.status!=='paid').length===0&&<div className="kf-empty-sm"><CheckCircle size={20}/>All paid!</div>}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function CustomersList({customers,vehicles,getName,search,onSelect,onAdd}) {
