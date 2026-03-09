@@ -764,12 +764,13 @@ function Dashboard({stats,estimates,invoices,customers,getName,onSelectEstimate}
   const [rangeStart, rangeEnd] = getRange();
 
   const inRange = dateStr => {
-    if (!dateStr) return false;
+    if (!dateStr) return true; // undated invoices always included
     const d = dateStr.split('T')[0];
     return d >= rangeStart && d <= rangeEnd;
   };
 
   const rangeInvoices = invoices.filter(i => inRange(i.convertedAt || i.createdAt));
+
   const revenue = rangeInvoices.filter(i => i.status === 'paid').reduce((s,i) => s + (i.finalTotal||i.total||0), 0);
   const invoiceCount = rangeInvoices.length;
   const unpaidCount = rangeInvoices.filter(i => i.status !== 'paid').length;
@@ -793,7 +794,7 @@ function Dashboard({stats,estimates,invoices,customers,getName,onSelectEstimate}
             <input type="date" value={customEnd} onChange={e=>setCustomEnd(e.target.value)}/>
           </div>
         )}
-        <span className="kf-sub" style={{marginLeft:'auto'}}>{invoiceCount} invoice{invoiceCount!==1?'s':''} in period</span>
+        <span className="kf-sub" style={{marginLeft:'auto'}}>{invoiceCount} invoice{invoiceCount!==1?'s':''} in period {invoices.filter(i=>!(i.convertedAt||i.createdAt)).length > 0 && `(+${invoices.filter(i=>!(i.convertedAt||i.createdAt)).length} undated)`}</span>
       </div>
 
       {/* Stat cards */}
