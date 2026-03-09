@@ -1808,3 +1808,30 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
   border-radius: 6px;
   color: var(--text);
 }
+
+/* ===== Archive ===== */
+.kf-archive-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(184,134,11,0.1);
+  border: 1px solid rgba(184,134,11,0.25);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  color: #b8860b;
+  margin-bottom: 14px;
+}
+.kf-row-archived td { opacity: 0.5; font-style: italic; }
+.kf-icon-btn.secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: background 0.15s, color 0.15s;
+}
+.kf-icon-btn.secondary:hover { background: var(--surface); color: var(--text); }
