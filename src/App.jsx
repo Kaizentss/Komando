@@ -857,6 +857,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
   const [importFile, setImportFile] = useState(null);
   const [importPreview, setImportPreview] = useState(null); // {type, rows, errors}
   const [importing, setImporting] = useState(false);
+  const [importAssignCustomerId, setImportAssignCustomerId] = useState('');
   const importRef = useRef(null);
 
   const parseShopmonkeyFleet = (workbook) => {
@@ -928,7 +929,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       };
       if (type === 'labor') {
         item.type = 'labor';
-        item.hours = parseFloat(r[iHours]) || 0;
+        item.hours = Math.round((parseFloat(r[iHours]) || 0) * 10000) / 10000;
         item.rate = parseFloat(r[iRate]) || 0;
       } else if (type === 'part') {
         item.type = 'part';
@@ -957,6 +958,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
     if (!file) return;
     setImportFile(file.name);
     setImportPreview(null);
+    setImportAssignCustomerId('');
     try {
       const buf = await file.arrayBuffer();
       const workbook = XLSX.read(buf, {type:'array'});
@@ -1025,7 +1027,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
           number: order.orderNum,
           status: 'paid',
           source: 'shopmonkey',
-          customerId: null,
+          customerId: importAssignCustomerId || null,
           vehicleId: null,
           vehicleStr: order.vehicleStr,
           createdAt: order.date,
@@ -1239,6 +1241,20 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
 
           {importPreview && (
             <div className="kf-import-preview">
+              {importPreview.type === 'orders' && (
+                <div className="kf-import-customer-assign">
+                  <label><Users size={14}/> Assign all invoices to customer:</label>
+                  <select value={importAssignCustomerId} onChange={e => setImportAssignCustomerId(e.target.value)}>
+                    <option value="">— No customer (unlinked) —</option>
+                    {[...(customers||[])].sort((a,b)=>(a.companyName||`${a.firstName} ${a.lastName}`).localeCompare(b.companyName||`${b.firstName} ${b.lastName}`)).map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.type==='fleet' ? c.companyName : `${c.firstName} ${c.lastName}`}
+                      </option>
+                    ))}
+                  </select>
+                  {importAssignCustomerId && <span className="kf-import-assign-note">✓ All {importPreview.rows.length} invoices will be linked to this customer</span>}
+                </div>
+              )}
               <div className="kf-import-preview-header">
                 <div>
                   <strong>{importPreview.rows.length} {importPreview.type === 'orders' ? 'invoices' : 'customers'} ready to import</strong>
