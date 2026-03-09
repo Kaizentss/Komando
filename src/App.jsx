@@ -4,7 +4,7 @@ import {
   Settings, ChevronRight, Building2, Wrench, CheckCircle, AlertCircle, 
   X, Save, CreditCard, Home, BarChart3, Trash2, Zap, Loader2, Send,
   Edit2, UserCog, Clock, Package, Tag, Upload, Image, File, Video,
-  StickyNote, Eye, EyeOff, Camera, LogOut, Lock, User, ArrowLeft,
+  StickyNote, Eye, EyeOff, Camera, LogOut, Lock, User, ArrowLeft, ArrowUp, ArrowDown,
   Clipboard, ChevronDown, CircleDot, Printer, Layers, FolderPlus, ChevronUp,
   MapPin, Shield, SlidersHorizontal, Globe, Database, Download, RefreshCw,
   PowerOff, Key, AlertTriangle
@@ -804,55 +804,169 @@ function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,
 }
 
 function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,onBulkDelete}) {
-  const [filter,setFilter]=useState('all');
-  const [selected,setSelected]=useState(new Set());
-  const list=invoices.filter(i=>filter==='all'||i.status===filter);
-  const getLocName=id=>locations?.find(l=>l.id===id)?.name||'';
-  const showLoc=locations?.length>1;
-  const allChecked=list.length>0&&list.every(i=>selected.has(i.id));
-  const toggleAll=()=>setSelected(allChecked?new Set():new Set(list.map(i=>i.id)));
-  const toggle=id=>setSelected(prev=>{const s=new Set(prev);s.has(id)?s.delete(id):s.add(id);return s;});
-  const handleBulkDelete=()=>{
-    if(!selected.size)return;
-    if(!confirm(`Delete ${selected.size} invoice${selected.size>1?'s':''}? This cannot be undone.`))return;
+  const [pickedId, setPickedId] = useState(null);
+  const [sortDir, setSortDir] = useState('desc'); // desc = highest first
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [selected, setSelected] = useState(new Set());
+  const [search, setSearch] = useState('');
+
+  // Build customer list — only those who have at least one invoice
+  const customerHasInvoice = new Set(invoices.map(i => i.customerId).filter(Boolean));
+  const withInvoices = customers.filter(c => customerHasInvoice.has(c.id));
+  const unlinked = invoices.filter(i => !i.customerId);
+
+  const getLocName = id => locations?.find(l => l.id === id)?.name || '';
+  const showLoc = locations?.length > 1;
+
+  // ── Customer picker screen ──────────────────────────────────────────────
+  if (!pickedId) {
+    const filtered = search
+      ? withInvoices.filter(c => getName(c).toLowerCase().includes(search.toLowerCase()))
+      : withInvoices;
+    const sorted = [...filtered].sort((a,b) => getName(a).localeCompare(getName(b)));
+    return (
+      <div>
+        <div className="kf-inv-pick-header">
+          <h2>Invoices</h2>
+          <input
+            className="kf-search-input"
+            placeholder="Search customers…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="kf-inv-customer-grid">
+          {sorted.map(c => {
+            const cinvs = invoices.filter(i => i.customerId === c.id);
+            const unpaid = cinvs.filter(i => i.status !== 'paid');
+            const total = cinvs.reduce((s,i) => s + (i.finalTotal||i.total||0), 0);
+            return (
+              <div key={c.id} className="kf-inv-customer-card" onClick={() => { setPickedId(c.id); setSelected(new Set()); }}>
+                <div className="kf-inv-card-name">{getName(c)}</div>
+                <div className="kf-inv-card-meta">
+                  <span>{cinvs.length} invoice{cinvs.length !== 1 ? 's' : ''}</span>
+                  {unpaid.length > 0 && <span className="red">{unpaid.length} unpaid</span>}
+                  <span className="kf-inv-card-total">${total.toFixed(2)}</span>
+                </div>
+              </div>
+            );
+          })}
+          {unlinked.length > 0 && (
+            <div className="kf-inv-customer-card unlinked" onClick={() => { setPickedId('__unlinked__'); setSelected(new Set()); }}>
+              <div className="kf-inv-card-name">⚠ Unlinked Invoices</div>
+              <div className="kf-inv-card-meta">
+                <span>{unlinked.length} invoice{unlinked.length !== 1 ? 's' : ''}</span>
+                <span className="kf-sub">No customer assigned</span>
+              </div>
+            </div>
+          )}
+          {sorted.length === 0 && unlinked.length === 0 && (
+            <div className="kf-empty"><DollarSign size={40}/><p>No invoices yet</p></div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Invoice list screen ─────────────────────────────────────────────────
+  const customer = pickedId === '__unlinked__' ? null : customers.find(c => c.id === pickedId);
+  const base = pickedId === '__unlinked__'
+    ? invoices.filter(i => !i.customerId)
+    : invoices.filter(i => i.customerId === pickedId);
+
+  const filtered = base.filter(i => statusFilter === 'all' || i.status === statusFilter);
+
+  // Sort by invoice number numerically
+  const parseNum = n => parseInt((n||'').replace(/\D/g,'')) || 0;
+  const list = [...filtered].sort((a,b) =>
+    sortDir === 'asc'
+      ? parseNum(a.number) - parseNum(b.number)
+      : parseNum(b.number) - parseNum(a.number)
+  );
+
+  const allChecked = list.length > 0 && list.every(i => selected.has(i.id));
+  const toggleAll = () => setSelected(allChecked ? new Set() : new Set(list.map(i => i.id)));
+  const toggle = id => setSelected(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const handleBulkDelete = () => {
+    if (!selected.size) return;
+    if (!confirm(`Delete ${selected.size} invoice${selected.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
     onBulkDelete([...selected]);
     setSelected(new Set());
   };
+
+  const grandTotal = list.reduce((s,i) => s + (i.finalTotal||i.total||0), 0);
+  const unpaidTotal = list.filter(i=>i.status!=='paid').reduce((s,i) => s + (i.balance||0), 0);
+
   return (
     <div>
-      <div className="kf-actions">
+      {/* Back + header */}
+      <div className="kf-inv-list-header">
+        <button className="kf-btn secondary sm" onClick={() => { setPickedId(null); setSelected(new Set()); setSearch(''); }}>
+          <ArrowLeft size={14}/> All Customers
+        </button>
+        <div className="kf-inv-list-title">
+          <strong>{customer ? getName(customer) : 'Unlinked Invoices'}</strong>
+          <span className="kf-sub">{list.length} invoice{list.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div className="kf-inv-list-stats">
+          <span>Total: <strong>${grandTotal.toFixed(2)}</strong></span>
+          {unpaidTotal > 0 && <span className="red">Unpaid: <strong>${unpaidTotal.toFixed(2)}</strong></span>}
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div className="kf-actions" style={{marginBottom:8}}>
         <div style={{flex:1}}>
-          {selected.size>0&&(
+          {selected.size > 0 ? (
             <div className="kf-bulk-bar">
               <span>{selected.size} selected</span>
               <button className="kf-btn danger sm" onClick={handleBulkDelete}><Trash2 size={14}/>Delete Selected</button>
-              <button className="kf-btn secondary sm" onClick={()=>setSelected(new Set())}>Clear</button>
+              <button className="kf-btn secondary sm" onClick={() => setSelected(new Set())}>Clear</button>
             </div>
+          ) : (
+            <button
+              className="kf-btn secondary sm kf-sort-toggle"
+              onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
+              title="Toggle sort order"
+            >
+              {sortDir === 'desc'
+                ? <><ArrowDown size={14}/> Highest First</>
+                : <><ArrowUp size={14}/> Lowest First</>
+              }
+            </button>
           )}
         </div>
-        <div className="kf-tabs">{['all','unpaid','partial','paid'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</div>
+        <div className="kf-tabs">
+          {['all','unpaid','partial','paid'].map(f =>
+            <button key={f} className={statusFilter === f ? 'active' : ''} onClick={() => setStatusFilter(f)}>{f}</button>
+          )}
+        </div>
       </div>
+
       <div className="kf-card">
         <table><thead><tr>
           <th style={{width:36}}><input type="checkbox" checked={allChecked} onChange={toggleAll}/></th>
-          <th>Invoice</th><th>Customer</th>{showLoc&&<th>Location</th>}<th>Total</th><th>Balance</th><th>Status</th><th></th>
+          <th>Invoice #</th>
+          {showLoc && <th>Location</th>}
+          <th>Date</th>
+          <th>Total</th>
+          <th>Balance</th>
+          <th>Status</th>
+          <th></th>
         </tr></thead>
-        <tbody>{list.map(i=>{
-          const c=customers.find(x=>x.id===i.customerId);
-          return (
-            <tr key={i.id} className={selected.has(i.id)?'kf-row-selected':''}>
-              <td onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selected.has(i.id)} onChange={()=>toggle(i.id)}/></td>
-              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number}</strong></td>
-              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>{getName(c)}</td>
-              {showLoc&&<td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}
-              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>${(i.finalTotal||i.total||0).toFixed(2)}</td>
-              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className={i.balance>0?'red':'green'}>${(i.balance||0).toFixed(2)}</td>
-              <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className={`kf-badge ${i.status}`}>{i.status}</span></td>
-              <td><button className="kf-icon-btn danger" onClick={ev=>{ev.stopPropagation();onDelete(i);}} title="Delete"><Trash2 size={15}/></button></td>
-            </tr>
-          );
-        })}</tbody></table>
-        {list.length===0&&<div className="kf-empty"><DollarSign size={40}/></div>}
+        <tbody>{list.map(i => (
+          <tr key={i.id} className={selected.has(i.id) ? 'kf-row-selected' : ''}>
+            <td onClick={e => e.stopPropagation()}><input type="checkbox" checked={selected.has(i.id)} onChange={() => toggle(i.id)}/></td>
+            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number}</strong></td>
+            {showLoc && <td onClick={() => onSelect(i)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}
+            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}} className="kf-sub">{i.createdAt?.split('T')[0] || i.convertedAt?.split('T')[0] || '—'}</td>
+            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}}>${(i.finalTotal||i.total||0).toFixed(2)}</td>
+            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}} className={(i.balance||0) > 0 ? 'red' : 'green'}>${(i.balance||0).toFixed(2)}</td>
+            <td onClick={() => onSelect(i)} style={{cursor:'pointer'}}><span className={`kf-badge ${i.status}`}>{i.status}</span></td>
+            <td><button className="kf-icon-btn danger" onClick={ev => { ev.stopPropagation(); onDelete(i); }} title="Delete"><Trash2 size={15}/></button></td>
+          </tr>
+        ))}</tbody></table>
+        {list.length === 0 && <div className="kf-empty"><DollarSign size={40}/></div>}
       </div>
     </div>
   );
