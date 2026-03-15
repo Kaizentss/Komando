@@ -1122,6 +1122,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
     const headers = raw[headerRow];
     const idx = (name) => headers.findIndex(h => h && h.toString().startsWith(name));
     const iOrder=idx('Order #'), iDate=idx('Invoiced Date'), iVehicle=idx('Vehicle'),
+          iVin=idx('VIN'), iPlate=idx('License Plate'), iColor=idx('Color'), iMileageIn=idx('Mileage In'), iMileageOut=idx('Mileage Out'),
           iType=idx('Type'), iDesc=idx('Part Description'), iTech=idx('Technician'),
           iNote=idx('Note'), iHours=idx('Hours'), iRate=idx('Rate'), iCost=idx('Cost'),
           iPrice=idx('Price'), iQty=idx('Quantity'), iSubtotal=idx('Subtotal'), iStatus=idx('Status');
@@ -1139,6 +1140,11 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
           orderNum,
           date: dateStr,
           vehicleStr: r[iVehicle]?.toString().trim() || '',
+          vin:        r[iVin]?.toString().trim() || '',
+          plate:      r[iPlate]?.toString().trim() || '',
+          color:      r[iColor]?.toString().trim() || '',
+          mileageIn:  r[iMileageIn]?.toString().trim() || '',
+          mileageOut: r[iMileageOut]?.toString().trim() || '',
           items: [],
           total: 0,
         });
@@ -1247,36 +1253,45 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       const newInvoices = [...invoices];
       const newVehicles = [...vehicles];
 
-      // Vehicle dedup map: "customerId|year|make|model" → vehicleId
+      // Vehicle dedup: prefer VIN if available, otherwise year|make|model per customer
       const vehicleKey = (cid, year, make, model) =>
         `${cid||'none'}|${(year||'').toLowerCase()}|${(make||'').toLowerCase()}|${(model||'').toLowerCase()}`;
       const vehicleCache = new Map();
-      // Pre-seed from existing vehicles
       for (const v of newVehicles) {
+        if (v.vin) vehicleCache.set(`vin|${v.vin.toLowerCase()}`, v.id);
         vehicleCache.set(vehicleKey(v.customerId, v.year, v.make, v.model), v.id);
       }
 
       const getOrCreateVehicle = (order) => {
-        if (!order.vehicleStr) return null;
+        if (!order.vehicleStr && !order.vin) return null;
         const year  = order.vehicleYear  || '';
         const make  = order.vehicleMake  || '';
         const model = order.vehicleModel || '';
-        if (!year && !make) return null;
-        const cid = importAssignCustomerId || null;
+        const vin   = order.vin || '';
+        const cid   = importAssignCustomerId || null;
+
+        // Check VIN first (most reliable)
+        if (vin) {
+          const vinKey = `vin|${vin.toLowerCase()}`;
+          if (vehicleCache.has(vinKey)) return vehicleCache.get(vinKey);
+        }
+        // Fall back to year/make/model per customer
         const key = vehicleKey(cid, year, make, model);
         if (vehicleCache.has(key)) return vehicleCache.get(key);
+
         const vid = `v_sm_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
         newVehicles.push({
           id: vid,
           customerId: cid,
           year, make, model,
-          vin: '',
-          plate: '',
-          color: '',
-          mileageIn: '',
-          mileageOut: '',
+          vin:        order.vin   || '',
+          plate:      order.plate || '',
+          color:      order.color || '',
+          mileageIn:  order.mileageIn  || '',
+          mileageOut: order.mileageOut || '',
           source: 'shopmonkey',
         });
+        if (vin) vehicleCache.set(`vin|${vin.toLowerCase()}`, vid);
         vehicleCache.set(key, vid);
         return vid;
       };
