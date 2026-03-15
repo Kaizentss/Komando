@@ -736,7 +736,7 @@ export default function App() {
           {view==='invoices'   && <InvoicesList invoices={filteredInvoices} customers={sorted} locations={locations} getName={getName} onSelect={i=>setEditingEstimate(i)} onDelete={i=>{if(confirm(`Delete ${i.number}? This cannot be undone.`)){setInvoices(invoices.filter(x=>x.id!==i.id));notify('Invoice deleted');}}} onBulkDelete={ids=>{setInvoices(invoices.filter(x=>!ids.includes(x.id)));notify(`${ids.length} invoices deleted`);}} onArchive={(ids,archive)=>{setInvoices(invoices.map(x=>ids.includes(x.id)?{...x,archived:archive}:x));notify(`${ids.length} invoice${ids.length>1?'s':''} ${archive?'archived':'unarchived'}`);}}/>}
           {view==='canned'     && <CannedItemsView cannedItems={cannedItems} setCannedItems={setCannedItems} settings={settings} notify={notify}/>}
           {view==='messages'   && <MessagesView/>}
-          {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
+          {view==='settings'   && <SettingsView settings={settings} setSettings={setSettings} users={users} setUsers={setUsers} locations={locations} setLocations={setLocations} customers={customers} setCustomers={setCustomers} invoices={invoices} setInvoices={setInvoices} estimates={estimates} setEstimates={setEstimates} vehicles={vehicles} setVehicles={setVehicles} currentUser={currentUser} company={selectedCompany} notify={notify}/>}
         </div>
       </main>
 
@@ -1066,7 +1066,7 @@ function MessagesView() {
   return <div className="kf-empty" style={{height:400}}><MessageSquare size={60}/><p>Messaging coming soon</p></div>;
 }
 
-function SettingsView({settings,setSettings,users,setUsers,locations,setLocations,customers,setCustomers,invoices,setInvoices,currentUser,company,notify}) {
+function SettingsView({settings,setSettings,users,setUsers,locations,setLocations,customers,setCustomers,invoices,setInvoices,estimates,setEstimates,vehicles,setVehicles,currentUser,company,notify}) {
   const [localSettings,setLocalSettings]=useState(settings);
   const [tab,setTab]=useState('general');
   const [newUser,setNewUser]=useState({name:'',email:'',password:'',role:'technician',locationId:locations[0]?.id||''});
@@ -1242,19 +1242,55 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       notify(`Import complete: ${added} fleet customers added, ${skipped} skipped`);
 
     } else if (importPreview.type === 'orders') {
-      // Import as historical invoices — no customer linkage (SM doesn't export customer name here)
       const existingNums = new Set(invoices.map(i => i.number));
       let added = 0, skipped = 0;
       const newInvoices = [...invoices];
+      const newVehicles = [...vehicles];
+
+      // Vehicle dedup map: "customerId|year|make|model" → vehicleId
+      const vehicleKey = (cid, year, make, model) =>
+        `${cid||'none'}|${(year||'').toLowerCase()}|${(make||'').toLowerCase()}|${(model||'').toLowerCase()}`;
+      const vehicleCache = new Map();
+      // Pre-seed from existing vehicles
+      for (const v of newVehicles) {
+        vehicleCache.set(vehicleKey(v.customerId, v.year, v.make, v.model), v.id);
+      }
+
+      const getOrCreateVehicle = (order) => {
+        if (!order.vehicleStr) return null;
+        const year  = order.vehicleYear  || '';
+        const make  = order.vehicleMake  || '';
+        const model = order.vehicleModel || '';
+        if (!year && !make) return null;
+        const cid = importAssignCustomerId || null;
+        const key = vehicleKey(cid, year, make, model);
+        if (vehicleCache.has(key)) return vehicleCache.get(key);
+        const vid = `v_sm_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+        newVehicles.push({
+          id: vid,
+          customerId: cid,
+          year, make, model,
+          vin: '',
+          plate: '',
+          color: '',
+          mileageIn: '',
+          mileageOut: '',
+          source: 'shopmonkey',
+        });
+        vehicleCache.set(key, vid);
+        return vid;
+      };
+
       for (const order of importPreview.rows) {
         if (existingNums.has(order.orderNum)) { skipped++; continue; }
+        const vehicleId = getOrCreateVehicle(order);
         newInvoices.push({
           id: `inv_sm_${order.orderNum.replace('#','')}`,
           number: order.orderNum,
           status: 'paid',
           source: 'shopmonkey',
           customerId: importAssignCustomerId || null,
-          vehicleId: null,
+          vehicleId,
           vehicleStr: order.vehicleStr,
           createdAt: order.date,
           convertedAt: order.date,
@@ -1269,11 +1305,13 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
         existingNums.add(order.orderNum);
         added++;
       }
+      const newVehicleCount = newVehicles.length - vehicles.length;
+      setVehicles(newVehicles);
       setInvoices(newInvoices);
       setImporting(false);
       setImportPreview(null);
       setImportFile(null);
-      notify(`Import complete: ${added} invoices added, ${skipped} skipped (duplicates)`);
+      notify(`Import complete: ${added} invoices + ${newVehicleCount} vehicles added, ${skipped} skipped`);
     }
   };
   const saveSettings=()=>{setSettings(localSettings);notify('Settings saved');};
@@ -1447,6 +1485,45 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
         <div className="kf-card wide">
           <h3><Upload size={20}/> Import from Shopmonkey</h3>
           <p className="kf-sub" style={{marginBottom:20}}>Upload an export file from Shopmonkey. Duplicates (matched by company name) are automatically skipped.</p>
+
+          {/* ── Cleanup Tool ── */}
+          {(()=>{
+            const undatedInvoices = invoices.filter(i => !i.archived && !(i.convertedAt||i.createdAt) && i.source==='shopmonkey');
+            if (undatedInvoices.length === 0) return null;
+            return (
+              <div className="kf-cleanup-tool">
+                <div className="kf-cleanup-icon"><AlertTriangle size={20}/></div>
+                <div className="kf-cleanup-body">
+                  <strong>{undatedInvoices.length} undated imported invoice{undatedInvoices.length!==1?'s':''} detected</strong>
+                  <p className="kf-sub">These have no invoice date and were likely never completed in Shopmonkey. They should be archived estimates, not paid invoices.</p>
+                  <button className="kf-btn primary sm" onClick={()=>{
+                    // Convert each to an archived estimate, remove from invoices
+                    const newEstimates = undatedInvoices.map(inv => ({
+                      id: `est_${inv.id}`,
+                      number: `EST-SM-${inv.number.replace(/\D/g,'')}`,
+                      status: 'pending',
+                      archived: true,
+                      source: 'shopmonkey',
+                      customerId: inv.customerId||null,
+                      vehicleId: inv.vehicleId||null,
+                      vehicleStr: inv.vehicleStr||'',
+                      title: inv.notes||`Imported from Shopmonkey (${inv.number})`,
+                      items: inv.items||[],
+                      total: inv.finalTotal||inv.total||0,
+                      finalTotal: inv.finalTotal||inv.total||0,
+                      createdAt: new Date().toISOString(),
+                    }));
+                    setEstimates(prev => [...prev, ...newEstimates]);
+                    setInvoices(prev => prev.filter(i => !undatedInvoices.find(u=>u.id===i.id)));
+                    notify(`Converted ${undatedInvoices.length} undated invoices to archived estimates`);
+                  }}>
+                    <Archive size={14}/> Convert to Archived Estimates
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
 
           <div className="kf-import-formats">
             <div className="kf-import-format-card">
