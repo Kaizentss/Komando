@@ -1114,6 +1114,27 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
     return {type:'fleet', rows, errors:[]};
   };
 
+  const parseShopmonkeyAllInvoices = (workbook) => {
+    const ws = workbook.Sheets[workbook.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
+    const headerRow = raw.findIndex(r => r && r[0] === 'Order #' && r.some(c => c && c.toString().toLowerCase().includes('vin')));
+    if (headerRow === -1) return {error: 'Could not find All Invoices headers.'};
+    const headers = raw[headerRow];
+    const idx = (name) => headers.findIndex(h => h && h.toString().toLowerCase().includes(name.toLowerCase()));
+    const iOrder=idx('Order #'), iFirst=idx('First Name'), iLast=idx('Last Name'),
+          iOrderName=idx('Order Name'), iVin=idx('Vin'), iWriter=idx('Service Writer');
+    const rows = raw.slice(headerRow + 1).filter(r => r && r[iOrder]);
+    const result = rows.map(r => ({
+      orderNum: '#' + r[iOrder]?.toString().trim().replace(/^#/,''),
+      vin:       (r[iVin]||'').toString().trim(),
+      firstName: (r[iFirst]||'').toString().trim(),
+      lastName:  (r[iLast]||'').toString().trim(),
+      orderName: (r[iOrderName]||'').toString().trim(),
+      writer:    (r[iWriter]||'').toString().trim(),
+    })).filter(r => r.orderNum && r.orderNum !== '#');
+    return {type:'allInvoices', rows:result, errors:[]};
+  };
+
   const parseShopmonkeyOrderLineItems = (workbook) => {
     const ws = workbook.Sheets[workbook.SheetNames[0]];
     const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
@@ -1122,7 +1143,6 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
     const headers = raw[headerRow];
     const idx = (name) => headers.findIndex(h => h && h.toString().startsWith(name));
     const iOrder=idx('Order #'), iDate=idx('Invoiced Date'), iVehicle=idx('Vehicle'),
-          iVin=idx('VIN'), iPlate=idx('License Plate'), iColor=idx('Color'), iMileageIn=idx('Mileage In'), iMileageOut=idx('Mileage Out'),
           iType=idx('Type'), iDesc=idx('Part Description'), iTech=idx('Technician'),
           iNote=idx('Note'), iHours=idx('Hours'), iRate=idx('Rate'), iCost=idx('Cost'),
           iPrice=idx('Price'), iQty=idx('Quantity'), iSubtotal=idx('Subtotal'), iStatus=idx('Status');
@@ -1140,11 +1160,6 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
           orderNum,
           date: dateStr,
           vehicleStr: r[iVehicle]?.toString().trim() || '',
-          vin:        r[iVin]?.toString().trim() || '',
-          plate:      r[iPlate]?.toString().trim() || '',
-          color:      r[iColor]?.toString().trim() || '',
-          mileageIn:  r[iMileageIn]?.toString().trim() || '',
-          mileageOut: r[iMileageOut]?.toString().trim() || '',
           items: [],
           total: 0,
         });
@@ -1203,12 +1218,14 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
         result = parseShopmonkeyFleet(workbook);
       } else if (raw.some(r => r && r[0] === 'Order #*')) {
         result = parseShopmonkeyOrderLineItems(workbook);
+      } else if (raw.some(r => r && r[0] === 'Order #' && r.some(c => c && c.toString().toLowerCase().includes('vin')))) {
+        result = parseShopmonkeyAllInvoices(workbook);
       } else if (allText.includes('company name')) {
         result = parseShopmonkeyFleet(workbook);
       } else if (allText.includes('order #')) {
         result = parseShopmonkeyOrderLineItems(workbook);
       } else {
-        result = {error: 'Unrecognized format. Supported: Shopmonkey Fleet export or Order Line Items export.'};
+        result = {error: 'Unrecognized format. Supported: Shopmonkey Fleet, Order Line Items, or All Invoices export.'};
       }
       if (result.error) { notify(result.error, 'error'); setImportFile(null); return; }
       setImportPreview(result);
@@ -1263,35 +1280,21 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       }
 
       const getOrCreateVehicle = (order) => {
-        if (!order.vehicleStr && !order.vin) return null;
+        if (!order.vehicleStr) return null;
         const year  = order.vehicleYear  || '';
         const make  = order.vehicleMake  || '';
         const model = order.vehicleModel || '';
-        const vin   = order.vin || '';
-        const cid   = importAssignCustomerId || null;
-
-        // Check VIN first (most reliable)
-        if (vin) {
-          const vinKey = `vin|${vin.toLowerCase()}`;
-          if (vehicleCache.has(vinKey)) return vehicleCache.get(vinKey);
-        }
-        // Fall back to year/make/model per customer
+        if (!year && !make) return null;
+        const cid = importAssignCustomerId || null;
         const key = vehicleKey(cid, year, make, model);
         if (vehicleCache.has(key)) return vehicleCache.get(key);
-
         const vid = `v_sm_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
         newVehicles.push({
-          id: vid,
-          customerId: cid,
+          id: vid, customerId: cid,
           year, make, model,
-          vin:        order.vin   || '',
-          plate:      order.plate || '',
-          color:      order.color || '',
-          mileageIn:  order.mileageIn  || '',
-          mileageOut: order.mileageOut || '',
+          vin: '', plate: '', color: '', mileageIn: '', mileageOut: '',
           source: 'shopmonkey',
         });
-        if (vin) vehicleCache.set(`vin|${vin.toLowerCase()}`, vid);
         vehicleCache.set(key, vid);
         return vid;
       };
@@ -1327,6 +1330,40 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       setImportPreview(null);
       setImportFile(null);
       notify(`Import complete: ${added} invoices + ${newVehicleCount} vehicles added, ${skipped} skipped`);
+
+    } else if (importPreview.type === 'allInvoices') {
+      // Build lookup map: orderNum → row
+      const rowMap = new Map(importPreview.rows.map(r => [r.orderNum, r]));
+      let vinPatched = 0, notFound = 0;
+
+      const updatedInvoices = invoices.map(inv => {
+        const match = rowMap.get(inv.number);
+        if (!match) { notFound++; return inv; }
+        // Patch VIN onto the linked vehicle
+        if (inv.vehicleId && match.vin) {
+          const veh = vehicles.find(v => v.id === inv.vehicleId);
+          if (veh && !veh.vin) veh.vin = match.vin; // mutate for now, setVehicles below
+        }
+        vinPatched++;
+        return inv; // invoice itself doesn't need changing
+      });
+
+      // Rebuild vehicles array with VINs patched in
+      const updatedVehicles = vehicles.map(v => {
+        // Find any invoice linked to this vehicle that has a match
+        const linkedInvoice = invoices.find(i => i.vehicleId === v.id);
+        if (!linkedInvoice) return v;
+        const match = rowMap.get(linkedInvoice.number);
+        if (!match || !match.vin) return v;
+        return {...v, vin: match.vin};
+      });
+
+      setVehicles(updatedVehicles);
+      setInvoices(updatedInvoices);
+      setImporting(false);
+      setImportPreview(null);
+      setImportFile(null);
+      notify(`VIN enrichment complete: ${vinPatched} invoices matched, ${notFound} not found`);
     }
   };
   const saveSettings=()=>{setSettings(localSettings);notify('Settings saved');};
@@ -1549,6 +1586,10 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
               <div className="kf-import-format-icon"><FileText size={20}/></div>
               <div><strong>Order Line Items</strong><div className="kf-sub" style={{fontSize:'0.78rem'}}>Shopmonkey → Reports → Order Line Items → Export</div></div>
             </div>
+            <div className="kf-import-format-card">
+              <div className="kf-import-format-icon" style={{color:'#457B9D'}}><Key size={20}/></div>
+              <div><strong>All Invoices (VIN Enrichment)</strong><div className="kf-sub" style={{fontSize:'0.78rem'}}>Shopmonkey → Reports → All Invoices → Export — patches VINs onto existing invoices</div></div>
+            </div>
           </div>
 
           <div className="kf-import-dropzone" onClick={()=>importRef.current?.click()}>
@@ -1575,17 +1616,23 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
               )}
               <div className="kf-import-preview-header">
                 <div>
-                  <strong>{importPreview.rows.length} {importPreview.type === 'orders' ? 'invoices' : 'customers'} ready to import</strong>
+                  <strong>{importPreview.rows.length} {
+                    importPreview.type === 'orders' ? 'invoices' :
+                    importPreview.type === 'allInvoices' ? 'order records' :
+                    'customers'
+                  } ready to import</strong>
                   <span className="kf-sub" style={{marginLeft:12}}>
                     {importPreview.type === 'fleet'
                       ? `${importPreview.rows.filter(r => (customers||[]).some(c=>(c.companyName||'').toLowerCase().trim()===r.companyName.toLowerCase().trim())).length} duplicates will be skipped`
-                      : `${importPreview.rows.filter(r => invoices.some(i=>i.number===r.orderNum)).length} duplicates will be skipped`
+                      : importPreview.type === 'orders'
+                      ? `${importPreview.rows.filter(r => invoices.some(i=>i.number===r.orderNum)).length} duplicates will be skipped`
+                      : `${importPreview.rows.filter(r => invoices.some(i=>i.number===r.orderNum && i.vehicleId)).length} will get VINs patched`
                     }
                   </span>
                 </div>
                 <button className="kf-btn primary" onClick={handleDoImport} disabled={importing}>
                   {importing ? <Loader2 size={16} className="spin"/> : <Upload size={16}/>}
-                  Import {importPreview.rows.length} Records
+                  {importPreview.type === 'allInvoices' ? `Enrich ${importPreview.rows.length} Records` : `Import ${importPreview.rows.length} Records`}
                 </button>
               </div>
               <div className="kf-import-table-wrap">
@@ -1605,6 +1652,33 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
                         );
                       })}
                       {importPreview.rows.length > 50 && <tr><td colSpan={6} className="kf-sub" style={{textAlign:'center',padding:12}}>...and {importPreview.rows.length - 50} more</td></tr>}
+                    </tbody>
+                  </table>
+                ) : importPreview.type === 'allInvoices' ? (
+                  <table className="kf-import-table">
+                    <thead><tr><th>Order #</th><th>VIN</th><th>Order Name</th><th>Writer</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {importPreview.rows.slice(0,50).map((r,i) => {
+                        const matched = invoices.find(inv => inv.number === r.orderNum);
+                        const hasVin  = matched?.vehicleId && vehicles.find(v=>v.id===matched.vehicleId)?.vin;
+                        return (
+                          <tr key={i} className={!matched ? 'dupe' : ''}>
+                            <td>{r.orderNum}</td>
+                            <td><code style={{fontSize:'0.78rem'}}>{r.vin||'—'}</code></td>
+                            <td className="kf-sub">{r.orderName||'—'}</td>
+                            <td className="kf-sub">{r.writer||'—'}</td>
+                            <td>{!matched
+                              ? <span className="kf-sub">No match</span>
+                              : hasVin
+                              ? <span className="kf-sub">Already has VIN</span>
+                              : r.vin
+                              ? <span style={{color:'var(--success)'}}>Will patch VIN</span>
+                              : <span className="kf-sub">No VIN in source</span>
+                            }</td>
+                          </tr>
+                        );
+                      })}
+                      {importPreview.rows.length > 50 && <tr><td colSpan={5} className="kf-sub" style={{textAlign:'center',padding:12}}>...and {importPreview.rows.length - 50} more</td></tr>}
                     </tbody>
                   </table>
                 ) : (
