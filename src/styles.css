@@ -1835,3 +1835,117 @@ code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; 
   transition: background 0.15s, color 0.15s;
 }
 .kf-icon-btn.secondary:hover { background: var(--surface); color: var(--text); }
+
+/* ===== Import Cleanup Tool ===== */
+.kf-cleanup-tool {
+  display: flex;
+  gap: 14px;
+  background: rgba(230,57,70,0.07);
+  border: 1px solid rgba(230,57,70,0.25);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 24px;
+  align-items: flex-start;
+}
+.kf-cleanup-icon {
+  color: var(--primary);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.kf-cleanup-body strong { display: block; margin-bottom: 4px; }
+.kf-cleanup-body p { margin: 0 0 10px; font-size: 0.83rem; }
+
+/* ===== Job Board ===== */
+.kf-board-wrap { display: flex; flex-direction: column; height: calc(100vh - 120px); }
+.kf-board-toolbar {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.kf-board-filter {
+  padding: 8px 12px; border: 1.5px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 0.875rem;
+}
+.kf-board-toggle {
+  display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-dim);
+  cursor: pointer; user-select: none;
+}
+.kf-board {
+  display: flex; gap: 12px; overflow-x: auto; flex: 1;
+  padding-bottom: 16px; align-items: flex-start;
+}
+.kf-board-col {
+  min-width: 220px; width: 220px; flex-shrink: 0;
+  background: var(--surface); border-radius: 12px; overflow: hidden;
+  display: flex; flex-direction: column; max-height: 100%;
+}
+.kf-board-col-header {
+  padding: 12px 14px; border-top: 3px solid #888;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface-2);
+}
+.kf-board-col-title { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.kf-board-col-count {
+  font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+}
+.kf-board-cards { display: flex; flex-direction: column; gap: 8px; padding: 10px; overflow-y: auto; flex: 1; }
+.kf-board-card {
+  background: var(--bg); border: 1.5px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; cursor: pointer; transition: all 0.15s;
+}
+.kf-board-card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+.kf-bc-number { font-size: 0.75rem; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+.kf-bc-title { font-size: 0.83rem; font-weight: 600; margin-bottom: 4px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kf-bc-customer, .kf-bc-vehicle { font-size: 0.78rem; color: var(--text-dim); display: flex; align-items: center; gap: 4px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kf-bc-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+.kf-bc-total { font-weight: 700; font-size: 0.88rem; color: var(--text); }
+.kf-bc-tech {
+  font-size: 0.72rem; padding: 3px 6px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim);
+  max-width: 90px;
+}
+.kf-board-empty { text-align: center; color: var(--text-dim); font-size: 0.82rem; padding: 20px 0; opacity: 0.5; }
+
+/* ===== Activity Log ===== */
+.kf-activity-log {
+  margin-top: 20px; padding: 14px 16px;
+  background: var(--surface-2); border-radius: 10px; border: 1px solid var(--border);
+}
+.kf-activity-log h4 {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-dim); margin-bottom: 12px; font-weight: 700;
+}
+.kf-activity-list { display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto; }
+.kf-activity-entry {
+  display: flex; gap: 8px; align-items: flex-start;
+}
+.kf-activity-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); margin-top: 5px; flex-shrink: 0;
+}
+.kf-activity-text { font-size: 0.8rem; color: var(--text); line-height: 1.4; }
+.kf-activity-time { display: block; font-size: 0.72rem; color: var(--text-dim); margin-top: 2px; }
+.kf-activity-empty { font-size: 0.8rem; color: var(--text-dim); font-style: italic; }
+
+/* ===== Per-Insurer Pricing ===== */
+.kf-insurer-prices {
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--surface-2); border-radius: 8px; padding: 12px;
+  max-height: 240px; overflow-y: auto;
+}
+.kf-insurer-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.kf-insurer-name {
+  font-size: 0.8rem; color: var(--text-dim); min-width: 140px;
+}
+.kf-insurer-row input {
+  flex: 1; padding: 5px 10px; font-size: 0.82rem;
+  border: 1.5px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text);
+}
+
+/* ===== in_progress badge ===== */
+.kf-badge.in_progress { background: rgba(69,123,157,0.2); color: #457B9D; }
+
+/* ===== Board search sm ===== */
+.kf-search.sm { min-width: 180px; }
