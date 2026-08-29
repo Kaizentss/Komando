@@ -7,7 +7,7 @@ import {
   StickyNote, Eye, EyeOff, Camera, LogOut, Lock, User, ArrowLeft, ArrowUp, ArrowDown, Archive, ArchiveRestore,
   Clipboard, ChevronDown, CircleDot, Printer, Layers, FolderPlus, ChevronUp,
   MapPin, Shield, SlidersHorizontal, Globe, Database, Download, RefreshCw,
-  PowerOff, Key, AlertTriangle
+  PowerOff, Key, AlertTriangle, Kanban, Activity, Timer, UserCheck, TrendingUp, ChevronLeft, GripVertical
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -682,10 +682,15 @@ export default function App() {
   const isAdmin  = currentUser?.role === 'admin' || isMaster;
 
   const navItems = [
-    {id:'dashboard',icon:Home,label:'Dashboard'},{id:'customers',icon:Users,label:'Customers'},
-    {id:'vehicles',icon:Car,label:'Vehicles'},{id:'estimates',icon:FileText,label:'Estimates'},
-    {id:'invoices',icon:DollarSign,label:'Invoices'},{id:'canned',icon:Layers,label:'Canned Items'},
-    {id:'messages',icon:MessageSquare,label:'Messages'},{id:'settings',icon:Settings,label:'Settings'},
+    {id:'dashboard',icon:Home,label:'Dashboard'},
+    {id:'board',icon:Kanban,label:'Job Board'},
+    {id:'customers',icon:Users,label:'Customers'},
+    {id:'vehicles',icon:Car,label:'Vehicles'},
+    {id:'estimates',icon:FileText,label:'Estimates'},
+    {id:'invoices',icon:DollarSign,label:'Invoices'},
+    {id:'canned',icon:Layers,label:'Canned Items'},
+    {id:'messages',icon:MessageSquare,label:'Messages'},
+    {id:'settings',icon:Settings,label:'Settings'},
   ];
 
   return (
@@ -730,6 +735,7 @@ export default function App() {
         </header>
         <div className="kf-content">
           {view==='dashboard'  && <Dashboard stats={stats} estimates={filteredEstimates} invoices={filteredInvoices} customers={sorted} getName={getName} onSelectEstimate={e=>setEditingEstimate(e)}/>}
+          {view==='board'      && <JobBoard estimates={filteredEstimates} invoices={filteredInvoices} customers={sorted} vehicles={vehicles} users={users} getName={getName} onSelect={e=>setEditingEstimate(e)} onStatusChange={(doc,status)=>{if(doc.docType==='invoice'){setInvoices(invoices.map(x=>x.id===doc.id?{...x,status}:x));}else{setEstimates(estimates.map(x=>x.id===doc.id?{...x,status}:x));}notify('Status updated');}} onAssignTech={(doc,techId)=>{if(doc.docType==='invoice'){setInvoices(invoices.map(x=>x.id===doc.id?{...x,assignedTechId:techId}:x));}else{setEstimates(estimates.map(x=>x.id===doc.id?{...x,assignedTechId:techId}:x));}notify('Technician assigned');}}/>}
           {view==='customers'  && <CustomersList customers={sorted} vehicles={vehicles} getName={getName} search={search} onSelect={c=>{setSelected(c);setModal('custDetail');}} onAdd={()=>setModal('custAdd')}/>}
           {view==='vehicles'   && <VehiclesList vehicles={vehicles} customers={sorted} getName={getName} search={search} onAdd={()=>setModal('vehAdd')}/>}
           {view==='estimates'  && <EstimatesList estimates={filteredEstimates} customers={sorted} vehicles={vehicles} locations={locations} getName={getName} onSelect={e=>setEditingEstimate(e)} onCreate={handleNewEstimate} onDelete={e=>{if(confirm(`Delete ${e.number}? This cannot be undone.`)){setEstimates(estimates.filter(x=>x.id!==e.id));notify('Estimate deleted');}}} onArchive={e=>{setEstimates(estimates.map(x=>x.id===e.id?{...x,archived:!x.archived}:x));notify(e.archived?'Estimate unarchived':'Estimate archived');}}/>}
@@ -877,8 +883,8 @@ function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,
         <div className="kf-tabs">
           {(showArchived
             ? ['all','pending','approved','converted']
-            : ['all','pending','approved','converted']
-          ).map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}
+            : ['all','pending','approved','in_progress','converted']
+          ).map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f.replace('_',' ')}</button>)}
         </div>
       </div>
       {showArchived && <div className="kf-archive-notice"><Archive size={14}/> Showing archived estimates — these are hidden from normal views.</div>}
@@ -1057,6 +1063,99 @@ function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,on
           </tr>
         ))}</tbody></table>
         {list.length===0&&<div className="kf-empty"><DollarSign size={40}/></div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Job Board ────────────────────────────────────────────────────────────────
+const BOARD_STATUSES = [
+  { id: 'pending',     label: 'Estimate',    color: '#E9C46A' },
+  { id: 'approved',   label: 'Approved',    color: '#2A9D8F' },
+  { id: 'in_progress',label: 'In Progress', color: '#457B9D' },
+  { id: 'completed',  label: 'Completed',   color: '#2D936C' },
+  { id: 'unpaid',     label: 'Invoiced',    color: '#9B72CF' },
+  { id: 'paid',       label: 'Paid',        color: '#888'    },
+];
+
+function JobBoard({ estimates, invoices, customers, vehicles, users, getName, onSelect, onStatusChange, onAssignTech }) {
+  const [filterTech, setFilterTech] = useState('');
+  const [search, setSearch] = useState('');
+  const [hidePaid, setHidePaid] = useState(true);
+
+  const techs = users.filter(u => u.role === 'technician' || u.role === 'master_admin' || u.role === 'admin');
+
+  // Combine estimates + invoices into one pool
+  const allDocs = [
+    ...estimates.filter(e => !e.archived).map(e => ({ ...e, _pool: 'estimate' })),
+    ...invoices.filter(i => !i.archived).map(i => ({ ...i, _pool: 'invoice', status: i.status === 'unpaid' || i.status === 'partial' ? 'unpaid' : 'paid' })),
+  ].filter(d => {
+    if (hidePaid && d.status === 'paid') return false;
+    if (filterTech && d.assignedTechId !== filterTech) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const c = customers.find(x => x.id === d.customerId);
+      const v = vehicles.find(x => x.id === d.vehicleId);
+      return d.number?.toLowerCase().includes(q) ||
+        (c && getName(c).toLowerCase().includes(q)) ||
+        (v && `${v.year} ${v.make} ${v.model}`.toLowerCase().includes(q)) ||
+        d.title?.toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const visibleStatuses = BOARD_STATUSES.filter(s => !hidePaid || s.id !== 'paid');
+
+  return (
+    <div className="kf-board-wrap">
+      <div className="kf-board-toolbar">
+        <div className="kf-search sm"><Search size={15}/><input placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
+        <select value={filterTech} onChange={e=>setFilterTech(e.target.value)} className="kf-board-filter">
+          <option value="">All Techs</option>
+          {techs.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+        <label className="kf-board-toggle"><input type="checkbox" checked={hidePaid} onChange={e=>setHidePaid(e.target.checked)}/> Hide Paid</label>
+      </div>
+      <div className="kf-board">
+        {visibleStatuses.map(col => {
+          const cards = allDocs.filter(d => d.status === col.id);
+          return (
+            <div key={col.id} className="kf-board-col">
+              <div className="kf-board-col-header" style={{borderTopColor: col.color}}>
+                <span className="kf-board-col-title">{col.label}</span>
+                <span className="kf-board-col-count" style={{background: col.color+'33', color: col.color}}>{cards.length}</span>
+              </div>
+              <div className="kf-board-cards">
+                {cards.map(doc => {
+                  const cust = customers.find(c => c.id === doc.customerId);
+                  const veh = vehicles.find(v => v.id === doc.vehicleId);
+                  const tech = users.find(u => u.id === doc.assignedTechId);
+                  return (
+                    <div key={doc.id} className="kf-board-card" onClick={() => onSelect(doc)}>
+                      <div className="kf-bc-number">{doc.number}</div>
+                      {doc.title && <div className="kf-bc-title">{doc.title}</div>}
+                      {cust && <div className="kf-bc-customer"><Users size={11}/>{getName(cust)}</div>}
+                      {veh && <div className="kf-bc-vehicle"><Car size={11}/>{veh.year} {veh.make} {veh.model}</div>}
+                      <div className="kf-bc-footer">
+                        <span className="kf-bc-total">${(doc.finalTotal||doc.total||0).toFixed(2)}</span>
+                        <select
+                          className="kf-bc-tech"
+                          value={doc.assignedTechId || ''}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => { e.stopPropagation(); onAssignTech(doc, e.target.value || null); }}
+                        >
+                          <option value="">Unassigned</option>
+                          {techs.map(u => <option key={u.id} value={u.id}>{u.name.split(' ')[0]}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+                {cards.length === 0 && <div className="kf-board-empty">—</div>}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1911,7 +2010,35 @@ function CannedItemsView({cannedItems, setCannedItems, settings, notify}) {
               {(editingItem?.type || newItem.type) === 'fee' && (
                 <div className="kf-form-group"><label>Price ($)</label><input type="number" step="0.01" value={editingItem?.price || newItem.price} onChange={e => editingItem ? setEditingItem({...editingItem, price: +e.target.value || 0}) : setNewItem({...newItem, price: +e.target.value || 0})}/></div>
               )}
-              <div className="kf-form-group"><label>Notes (internal details)</label><textarea rows={3} value={editingItem?.notes || newItem.notes} onChange={e => editingItem ? setEditingItem({...editingItem, notes: e.target.value}) : setNewItem({...newItem, notes: e.target.value})} placeholder="Detailed notes for this line item..."/></div>
+              <div className="kf-form-group"><label>Notes (internal details)</label><textarea rows={2} value={editingItem?.notes || newItem.notes} onChange={e => editingItem ? setEditingItem({...editingItem, notes: e.target.value}) : setNewItem({...newItem, notes: e.target.value})} placeholder="Detailed notes for this line item..."/></div>
+
+              {/* Per-biller pricing */}
+              <div className="kf-form-group">
+                <label>Per-Insurer Pricing <span className="kf-sub">(overrides default when that biller is selected)</span></label>
+                <div className="kf-insurer-prices">
+                  {['State Farm','Geico','Progressive','Allstate','Farmers','USAA','Liberty Mutual','Nationwide','Travelers','Other Insurance'].map(biller => {
+                    const cur = editingItem || newItem;
+                    const prices = cur.insurerPrices || {};
+                    const val = prices[biller] !== undefined ? prices[biller] : '';
+                    return (
+                      <div key={biller} className="kf-insurer-row">
+                        <span className="kf-insurer-name">{biller}</span>
+                        <input
+                          type="number" step="0.01" placeholder="Default"
+                          value={val}
+                          onChange={e => {
+                            const newPrices = {...prices};
+                            if (e.target.value === '') delete newPrices[biller];
+                            else newPrices[biller] = parseFloat(e.target.value)||0;
+                            if (editingItem) setEditingItem({...editingItem, insurerPrices: newPrices});
+                            else setNewItem({...newItem, insurerPrices: newPrices});
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
             <div className="kf-modal-footer">
               <button className="kf-btn secondary" onClick={() => { setShowAddItem(false); setEditingItem(null); }}>Cancel</button>
@@ -2819,15 +2946,19 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
     : [];
 
   const addCannedItem = (cannedItem) => {
+    // Check if doc has a biller set — apply biller price immediately
+    const billerPrice = doc.billedTo && cannedItem.insurerPrices?.[doc.billedTo];
+    const effectiveRate = typeof billerPrice === 'number' ? billerPrice : (cannedItem.rate || cannedItem.cost || cannedItem.price || 0);
     const newItem = {
       id: `i${Date.now()}`,
       type: cannedItem.type,
       description: cannedItem.name + (cannedItem.description ? ` - ${cannedItem.description}` : ''),
       notes: cannedItem.notes || '',
       technicianId: '',
-      ...(cannedItem.type === 'labor' && { hours: cannedItem.hours, rate: cannedItem.rate }),
-      ...(cannedItem.type === 'part' && { quantity: cannedItem.quantity, cost: cannedItem.cost }),
-      ...(cannedItem.type === 'fee' && { price: cannedItem.price }),
+      cannedRef: { id: cannedItem.id, insurerPrices: cannedItem.insurerPrices || {} },
+      ...(cannedItem.type === 'labor' && { hours: cannedItem.hours, rate: effectiveRate }),
+      ...(cannedItem.type === 'part' && { quantity: cannedItem.quantity, cost: effectiveRate }),
+      ...(cannedItem.type === 'fee' && { price: effectiveRate }),
     };
     update({items: [...(doc.items || []), newItem]});
     setCannedSearch('');
@@ -2851,7 +2982,8 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
     const newTotalPaid = newPayments.reduce((s, p) => s + p.amount, 0);
     const newBalance = total - newTotalPaid;
     const newStatus = newBalance <= 0 ? 'paid' : 'partial';
-    update({ payments: newPayments, balance: newBalance, status: newStatus });
+    const entry = {summary:`Payment of $${payAmount.toFixed(2)} (${payMethod}) recorded by ${currentUser.name}`, at: new Date().toISOString()};
+    update({ payments: newPayments, balance: newBalance, status: newStatus, activityLog: [...(doc.activityLog||[]), entry] });
     setShowPayment(false);
     setPayAmount(0);
     notify('Payment recorded');
@@ -3019,7 +3151,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
     setTimeout(() => printWindow.print(), 250);
   };
 
-  const canEdit = doc.status === 'pending' || doc.status === 'approved';
+  const canEdit = doc.status === 'pending' || doc.status === 'approved' || doc.status === 'in_progress';
 
   return (
     <div className="kf-estimate-page">
@@ -3037,7 +3169,7 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
         </div>
         <div className="kf-est-header-right">
           <button className="kf-btn secondary" onClick={() => handlePrint()}><Printer size={16}/>Print</button>
-          <span className={`kf-badge lg ${doc.status}`}>{doc.status}</span>
+          <span className={`kf-badge lg ${doc.status}`}>{doc.status?.replace('_',' ')}</span>
           {/* Auto-save status */}
           <span className={`kf-autosave-status ${saveStatus}`}>
             {saveStatus === 'saving' && <><Loader2 size={13} className="spin"/>Saving…</>}
@@ -3046,9 +3178,27 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
           </span>
           {hasChanges && <button className="kf-btn primary" onClick={handleSave}><Save size={16}/>Save Now</button>}
           
-          {/* Estimate actions */}
-          {!isInvoice && doc.status === 'pending' && doc.customerId && doc.vehicleId && <button className="kf-btn success" onClick={() => {update({status:'approved'});notify('Approved!');}}><CheckCircle size={16}/>Approve</button>}
-          {!isInvoice && doc.status === 'approved' && <button className="kf-btn success" onClick={() => onConvert(doc)}><DollarSign size={16}/>Convert to Invoice</button>}
+          {/* Estimate status flow */}
+          {!isInvoice && doc.status === 'pending' && doc.customerId && doc.vehicleId && (
+            <button className="kf-btn success" onClick={() => {
+              const entry = {summary:`Estimate approved by ${currentUser.name}`, at: new Date().toISOString()};
+              update({status:'approved', activityLog:[...(doc.activityLog||[]), entry]});
+              notify('Approved!');
+            }}><CheckCircle size={16}/>Approve</button>
+          )}
+          {!isInvoice && doc.status === 'approved' && (
+            <button className="kf-btn primary" onClick={() => {
+              const entry = {summary:`Marked In Progress by ${currentUser.name}`, at: new Date().toISOString()};
+              update({status:'in_progress', activityLog:[...(doc.activityLog||[]), entry]});
+              notify('Marked In Progress');
+            }}><Wrench size={16}/>Start Work</button>
+          )}
+          {!isInvoice && doc.status === 'in_progress' && (
+            <button className="kf-btn success" onClick={() => onConvert(doc)}><DollarSign size={16}/>Complete &amp; Invoice</button>
+          )}
+          {!isInvoice && doc.status === 'approved' && (
+            <button className="kf-btn success" onClick={() => onConvert(doc)} style={{marginLeft:4}}><DollarSign size={16}/>Invoice</button>
+          )}
           
           {/* Invoice actions */}
           {isInvoice && doc.status !== 'paid' && <button className="kf-btn success" onClick={() => { setPayAmount(balance); setShowPayment(true); }}><CreditCard size={16}/>Record Payment</button>}
@@ -3091,12 +3241,16 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
           {/* Comments & Recommendations */}
           <div className="kf-est-comments">
             <div className="kf-est-comment-box">
-              <label><MessageSquare size={14}/> Customer Comments</label>
-              {canEdit ? <textarea value={doc.customerComments || ''} onChange={e => update({customerComments: e.target.value})} placeholder="Customer concerns..."/> : <p>{doc.customerComments || 'None'}</p>}
+              <label><MessageSquare size={14}/> Customer Complaint</label>
+              {canEdit ? <textarea value={doc.customerComments || ''} onChange={e => update({customerComments: e.target.value})} placeholder="Customer's reported concern..."/> : <p>{doc.customerComments || '—'}</p>}
+            </div>
+            <div className="kf-est-comment-box">
+              <label><Wrench size={14}/> Tech Findings</label>
+              {canEdit ? <textarea value={doc.techFindings || ''} onChange={e => update({techFindings: e.target.value})} placeholder="What the technician found..."/> : <p>{doc.techFindings || '—'}</p>}
             </div>
             <div className="kf-est-comment-box">
               <label><Clipboard size={14}/> Recommendations</label>
-              {canEdit ? <textarea value={doc.recommendations || ''} onChange={e => update({recommendations: e.target.value})} placeholder="Technician recommendations..."/> : <p>{doc.recommendations || 'None'}</p>}
+              {canEdit ? <textarea value={doc.recommendations || ''} onChange={e => update({recommendations: e.target.value})} placeholder="Additional recommendations..."/> : <p>{doc.recommendations || '—'}</p>}
             </div>
           </div>
 
@@ -3236,6 +3390,49 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
             <div><span>Created By</span><span>{users.find(u => u.id === doc.createdBy)?.name || '-'}</span></div>
             {isInvoice && doc.dueAt && <div><span>Due Date</span><span>{doc.dueAt}</span></div>}
             {isInvoice && doc.convertedAt && <div><span>Invoiced</span><span>{doc.convertedAt}</span></div>}
+
+            {/* Assigned Technician */}
+            <div className="kf-meta-field">
+              <span>Technician</span>
+              <select value={doc.assignedTechId||''} onChange={e=>update({assignedTechId:e.target.value||null})} className="kf-meta-input">
+                <option value="">Unassigned</option>
+                {users.filter(u=>u.role==='technician'||u.role==='master_admin'||u.role==='admin').map(u=><option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+
+            {/* Billed To */}
+            <div className="kf-meta-field">
+              <span>Billed To</span>
+              <select value={doc.billedTo||''} onChange={e=>{
+                const biller = e.target.value;
+                // Re-price canned items for selected biller
+                if (biller && doc.items?.length > 0) {
+                  // Items that have a canned reference store it in cannedRef
+                  const repriced = (doc.items||[]).map(item => {
+                    if (!item.cannedRef?.insurerPrices) return item;
+                    const billerPrice = item.cannedRef.insurerPrices[biller];
+                    if (typeof billerPrice === 'number') return {...item, rate: billerPrice, cost: billerPrice};
+                    return item;
+                  });
+                  update({billedTo: biller, items: repriced});
+                } else {
+                  update({billedTo: biller});
+                }
+              }} className="kf-meta-input">
+                <option value="">Customer Pay</option>
+                <option value="State Farm">State Farm</option>
+                <option value="Geico">Geico</option>
+                <option value="Progressive">Progressive</option>
+                <option value="Allstate">Allstate</option>
+                <option value="Farmers">Farmers</option>
+                <option value="USAA">USAA</option>
+                <option value="Liberty Mutual">Liberty Mutual</option>
+                <option value="Nationwide">Nationwide</option>
+                <option value="Travelers">Travelers</option>
+                <option value="Other Insurance">Other Insurance</option>
+              </select>
+            </div>
+
             {isInvoice && (
               <div className="kf-meta-field"><span>PO #</span><input value={doc.poNumber||''} onChange={e=>updateSilent({poNumber:e.target.value})} placeholder="Optional" className="kf-meta-input"/></div>
             )}
@@ -3246,6 +3443,23 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
                 </select>
               </div>
             )}
+          </div>
+
+          {/* Activity Log */}
+          <div className="kf-activity-log">
+            <h4><Activity size={14}/> Activity</h4>
+            <div className="kf-activity-list">
+              {(doc.activityLog||[]).slice().reverse().map((entry, i) => (
+                <div key={i} className="kf-activity-entry">
+                  <div className="kf-activity-dot"/>
+                  <div>
+                    <span className="kf-activity-text">{entry.summary}</span>
+                    <span className="kf-activity-time">{new Date(entry.at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</span>
+                  </div>
+                </div>
+              ))}
+              {(!doc.activityLog||doc.activityLog.length===0) && <div className="kf-activity-empty">No activity yet</div>}
+            </div>
           </div>
         </div>
       </div>
