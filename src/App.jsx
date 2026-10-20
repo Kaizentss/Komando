@@ -689,7 +689,7 @@ export default function App() {
   const isAdmin  = currentUser?.role === 'admin' || isMaster;
 
   const navItems = [
-    {id:'dashboard',icon:Home,label:'Dashboard'},{id:'customers',icon:Users,label:'Customers'},
+    {id:'dashboard',icon:Home,label:'Dashboard'},{id:'customers',icon:Users,label:'Customers/Fleets'},
     {id:'vehicles',icon:Car,label:'Vehicles'},{id:'estimates',icon:FileText,label:'Estimates'},
     {id:'invoices',icon:DollarSign,label:'Invoices'},{id:'canned',icon:Layers,label:'Canned Items'},
     {id:'messages',icon:MessageSquare,label:'Messages'},{id:'settings',icon:Settings,label:'Settings'},
@@ -748,7 +748,7 @@ export default function App() {
       </main>
 
       {modal==='custAdd'    && <CustomerForm onClose={closeModal} onSave={c=>{handleAddCustomer(c);closeModal();notify('Customer added');}}/>}
-      {modal==='custDetail' && selected && <CustomerDetail customer={selected} vehicles={vehicles.filter(v=>v.customerId===selected.id)} getName={getName} onClose={closeModal}/>}
+      {modal==='custDetail' && selected && <CustomerDetail customer={selected} vehicles={vehicles.filter(v=>v.customerId===selected.id)} invoices={invoices.filter(i=>i.customerId===selected.id)} getName={getName} onClose={closeModal} onOpenInvoice={inv=>{setSelected(inv);setModal('invDetail');}}/>}
       {modal==='vehAdd'     && <VehicleForm customers={sorted} getName={getName} onClose={closeModal} onSave={v=>{handleAddVehicle(v);closeModal();notify('Vehicle added');}} notify={notify}/>}
       {modal==='invDetail'  && selected && <InvoiceDetail invoice={selected} customer={customers.find(c=>c.id===selected.customerId)} vehicle={vehicles.find(v=>v.id===selected.vehicleId)} settings={settings} users={users} getName={getName} onClose={closeModal} onRevert={()=>{handleRevertToEstimate(selected);closeModal();}} onPay={p=>{const upd={...selected,payments:[...(selected.payments||[]),p],balance:selected.balance-p.amount,status:selected.balance-p.amount<=0?'paid':'partial'};setInvoices(invoices.map(i=>i.id===selected.id?upd:i));setSelected(upd);notify('Payment recorded');}}/>}
     </div>
@@ -857,7 +857,7 @@ function CustomersList({customers,vehicles,getName,search,onSelect,onAdd}) {
 
 function VehiclesList({vehicles,customers,getName,search,onAdd}) {
   const list=vehicles.filter(v=>!search||`${v.year} ${v.make} ${v.model}`.toLowerCase().includes(search.toLowerCase()));
-  return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onAdd}><Plus size={16}/>Add</button></div><div className="kf-card"><table><thead><tr><th>Vehicle</th><th>VIN</th><th>Plate</th><th>Owner</th></tr></thead><tbody>{list.map(v=><tr key={v.id}><td>{v.year} {v.make} {v.model}</td><td><code>{v.vin?.slice(-8)}</code></td><td>{v.plate}</td><td>{getName(customers.find(c=>c.id===v.customerId))}</td></tr>)}</tbody></table>{list.length===0&&<div className="kf-empty"><Car size={40}/></div>}</div></div>;
+  return <div><div className="kf-actions"><button className="kf-btn primary" onClick={onAdd}><Plus size={16}/>Add</button></div><div className="kf-card"><table><thead><tr><th>Vehicle</th><th>VIN</th><th>Plate</th><th>Owner</th></tr></thead><tbody>{list.map(v=><tr key={v.id}><td>{v.year} {v.make} {v.model}</td><td><code>{v.vin}</code></td><td>{v.plate}</td><td>{getName(customers.find(c=>c.id===v.customerId))}</td></tr>)}</tbody></table>{list.length===0&&<div className="kf-empty"><Car size={40}/></div>}</div></div>;
 }
 
 function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,onCreate,onDelete,onArchive}) {
@@ -2167,8 +2167,141 @@ function CustomerForm({onClose, onSave}) {
   );
 }
 
-function CustomerDetail({customer, vehicles, getName, onClose}) {
-  return <div className="kf-overlay" onClick={onClose}><div className="kf-modal" onClick={e=>e.stopPropagation()}><div className="kf-modal-header"><h2>{getName(customer)}</h2><button className="kf-close" onClick={onClose}><X size={20}/></button></div><div className="kf-modal-body"><span className={`kf-badge ${customer.type}`}>{customer.type}</span><p style={{marginTop:12}}>{customer.phone} • {customer.email}</p><h4 style={{marginTop:20}}>Vehicles ({vehicles.length})</h4>{vehicles.map(v=><div key={v.id} className="kf-veh-row"><Car size={16}/><span>{v.year} {v.make} {v.model}</span><span className="kf-plate">{v.plate}</span></div>)}</div><div className="kf-modal-footer"><button className="kf-btn secondary" onClick={onClose}>Close</button></div></div></div>;
+function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOpenInvoice}) {
+  const [tab, setTab] = useState('orders');
+
+  const totalBilled = invoices.reduce((s,i)=>s+(i.finalTotal||i.total||0),0);
+  const totalPaid   = invoices.reduce((s,i)=>s+(i.payments||[]).reduce((a,p)=>a+p.amount,0),0);
+  const totalOwed   = invoices.reduce((s,i)=>s+(i.balance||0),0);
+
+  const statusColor = s => s==='paid'?'#22c55e':s==='partial'?'#f59e0b':s==='overdue'?'#ef4444':'#6b7280';
+
+  // Statements: group invoices by month
+  const statements = invoices.reduce((acc,inv)=>{
+    const d = inv.createdAt||inv.date||'';
+    const key = d ? new Date(d).toLocaleDateString('en-US',{year:'numeric',month:'long'}) : 'Unknown';
+    if(!acc[key]) acc[key]={month:key,invoices:[],total:0,paid:0};
+    acc[key].invoices.push(inv);
+    acc[key].total += inv.finalTotal||inv.total||0;
+    acc[key].paid  += (inv.payments||[]).reduce((a,p)=>a+p.amount,0);
+    return acc;
+  },{});
+
+  return (
+    <div className="kf-overlay" onClick={onClose}>
+      <div className="kf-panel" onClick={e=>e.stopPropagation()} style={{width:'min(680px,96vw)',height:'min(85vh,760px)',display:'flex',flexDirection:'column',background:'var(--surface,#111316)',borderRadius:12,overflow:'hidden',position:'relative'}}>
+
+        {/* Header */}
+        <div style={{padding:'24px 28px 0',borderBottom:'1px solid rgba(255,255,255,0.07)'}}>
+          <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:16}}>
+            <div>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+                <h2 style={{margin:0,fontSize:20,fontWeight:700,color:'var(--text,#f1f5f9)'}}>{getName(customer)}</h2>
+                <span className={`kf-badge ${customer.type}`}>{customer.type}</span>
+              </div>
+              <div style={{fontSize:13,color:'var(--muted,#64748b)',display:'flex',gap:16}}>
+                {customer.phone && <span>{customer.phone}</span>}
+                {customer.email && <span>{customer.email}</span>}
+              </div>
+            </div>
+            <button className="kf-close" onClick={onClose}><X size={20}/></button>
+          </div>
+
+          {/* Stats row */}
+          <div style={{display:'flex',gap:24,paddingBottom:16}}>
+            {[
+              {label:'Total Billed', val:`$${totalBilled.toFixed(2)}`},
+              {label:'Total Paid',   val:`$${totalPaid.toFixed(2)}`,  color:'#22c55e'},
+              {label:'Balance Due',  val:`$${totalOwed.toFixed(2)}`,  color:totalOwed>0?'#ef4444':'#22c55e'},
+              {label:'Vehicles',     val:vehicles.length},
+              {label:'Orders',       val:invoices.length},
+            ].map(s=>(
+              <div key={s.label}>
+                <div style={{fontSize:11,color:'var(--muted,#64748b)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:2}}>{s.label}</div>
+                <div style={{fontSize:16,fontWeight:700,color:s.color||'var(--text,#f1f5f9)'}}>{s.val}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Tabs */}
+          <div style={{display:'flex',gap:0,marginBottom:-1}}>
+            {['orders','statements'].map(t=>(
+              <button key={t} onClick={()=>setTab(t)} style={{padding:'8px 20px',background:'none',border:'none',borderBottom:tab===t?'2px solid #22c55e':'2px solid transparent',color:tab===t?'#22c55e':'var(--muted,#64748b)',fontWeight:tab===t?600:400,fontSize:13,cursor:'pointer',textTransform:'capitalize',transition:'all .15s'}}>
+                {t==='orders'?`Orders (${invoices.length})`:'Statements'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{flex:1,overflowY:'auto',padding:'0 28px'}}>
+          {tab==='orders' && (
+            invoices.length===0
+              ? <div style={{padding:'48px 0',textAlign:'center',color:'var(--muted,#64748b)'}}>No orders yet</div>
+              : <table style={{width:'100%',borderCollapse:'collapse'}}>
+                  <thead>
+                    <tr style={{borderBottom:'1px solid rgba(255,255,255,0.07)'}}>
+                      {['Order #','Date','Vehicle','Total','Status'].map(h=>(
+                        <th key={h} style={{padding:'12px 8px',textAlign:'left',fontSize:11,color:'var(--muted,#64748b)',textTransform:'uppercase',letterSpacing:'0.05em',fontWeight:500}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...invoices].sort((a,b)=>new Date(b.createdAt||b.date||0)-new Date(a.createdAt||a.date||0)).map(inv=>{
+                      const veh = vehicles.find(v=>v.id===inv.vehicleId);
+                      return (
+                        <tr key={inv.id} onClick={()=>onOpenInvoice&&onOpenInvoice(inv)} style={{borderBottom:'1px solid rgba(255,255,255,0.04)',cursor:'pointer',transition:'background .1s'}}
+                          onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.03)'}
+                          onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                          <td style={{padding:'12px 8px',fontSize:13,fontWeight:600,color:'#22c55e'}}>{inv.number||`INV-${inv.invoiceNumber||inv.id?.slice(-6)}`}</td>
+                          <td style={{padding:'12px 8px',fontSize:13,color:'var(--muted,#94a3b8)'}}>{inv.createdAt?new Date(inv.createdAt).toLocaleDateString():inv.date||'—'}</td>
+                          <td style={{padding:'12px 8px',fontSize:13,color:'var(--text,#f1f5f9)'}}>{veh?`${veh.year} ${veh.make} ${veh.model}`:'—'}</td>
+                          <td style={{padding:'12px 8px',fontSize:13,fontWeight:600,color:'var(--text,#f1f5f9)'}}>${(inv.finalTotal||inv.total||0).toFixed(2)}</td>
+                          <td style={{padding:'12px 8px'}}>
+                            <span style={{fontSize:11,fontWeight:600,padding:'3px 8px',borderRadius:4,background:statusColor(inv.status)+'22',color:statusColor(inv.status),textTransform:'uppercase',letterSpacing:'0.05em'}}>{inv.status}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+          )}
+
+          {tab==='statements' && (
+            Object.keys(statements).length===0
+              ? <div style={{padding:'48px 0',textAlign:'center',color:'var(--muted,#64748b)'}}>No statements yet</div>
+              : Object.values(statements).map(stmt=>(
+                  <div key={stmt.month} style={{marginTop:20}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                      <span style={{fontSize:13,fontWeight:700,color:'var(--text,#f1f5f9)'}}>{stmt.month}</span>
+                      <div style={{display:'flex',gap:20,fontSize:12,color:'var(--muted,#64748b)'}}>
+                        <span>Billed: <strong style={{color:'var(--text,#f1f5f9)'}}>${stmt.total.toFixed(2)}</strong></span>
+                        <span>Paid: <strong style={{color:'#22c55e'}}>${stmt.paid.toFixed(2)}</strong></span>
+                        <span>Owed: <strong style={{color:stmt.total-stmt.paid>0?'#ef4444':'#22c55e'}}>${(stmt.total-stmt.paid).toFixed(2)}</strong></span>
+                      </div>
+                    </div>
+                    {stmt.invoices.map(inv=>(
+                      <div key={inv.id} onClick={()=>onOpenInvoice&&onOpenInvoice(inv)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 12px',background:'rgba(255,255,255,0.03)',borderRadius:6,marginBottom:4,cursor:'pointer',transition:'background .1s'}}
+                        onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.06)'}
+                        onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.03)'}>
+                        <div style={{display:'flex',gap:12,alignItems:'center'}}>
+                          <span style={{fontSize:13,fontWeight:600,color:'#22c55e'}}>{inv.number||`INV-${inv.invoiceNumber||inv.id?.slice(-6)}`}</span>
+                          <span style={{fontSize:12,color:'var(--muted,#94a3b8)'}}>{inv.createdAt?new Date(inv.createdAt).toLocaleDateString():inv.date||''}</span>
+                        </div>
+                        <div style={{display:'flex',gap:16,alignItems:'center'}}>
+                          <span style={{fontSize:13,fontWeight:600}}>${(inv.finalTotal||inv.total||0).toFixed(2)}</span>
+                          <span style={{fontSize:11,fontWeight:600,padding:'2px 7px',borderRadius:4,background:statusColor(inv.status)+'22',color:statusColor(inv.status),textTransform:'uppercase'}}>{inv.status}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
 }
 
 function VehicleForm({customers, getName, onClose, onSave, notify, preselectedCustomer}) {
