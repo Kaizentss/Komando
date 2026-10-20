@@ -593,7 +593,14 @@ export default function App() {
   if (screen === 'login') return <UnifiedLogin onLoginUser={handleUserLogin} onLoginSuperAdmin={()=>setScreen('superadmin')}/>;
 
   // ── App shell ─────────────────────────────────────────────────────────────
-  const getName = c => c ? (c.type==='fleet' ? c.companyName : `${c.firstName} ${c.lastName}`) : '';
+  const getName = c => {
+    if (!c) return '';
+    // Support ShopMonkey import format (displayName / company / Fleet) and native format
+    if (c.displayName) return c.displayName;
+    if (c.type === 'fleet' || c.type === 'Fleet') return c.companyName || c.company || '';
+    if (c.firstName || c.lastName) return `${c.firstName || ''} ${c.lastName || ''}`.trim();
+    return c.name || '';
+  };
   const sorted = [...customers].sort((a,b)=>getName(a).localeCompare(getName(b)));
   const closeModal = () => { setModal(null); setSelected(null); };
   const getLocation = id => locations.find(l=>l.id===id) || null;
@@ -830,7 +837,7 @@ function Dashboard({stats,estimates,invoices,customers,getName,onSelectEstimate}
           <h3>Unpaid Invoices</h3>
           {invoices.filter(i=>i.status!=='paid').slice(0,5).map(i=>(
             <div key={i.id} className="kf-card-row">
-              <span>{i.number}</span>
+              <span>{i.number || (i.invoiceNumber ? `INV-${i.invoiceNumber}` : i.id?.slice(-6))}</span>
               <span>{getName(customers.find(c=>c.id===i.customerId))}</span>
               <span className="red">${(i.balance||0).toFixed(2)}</span>
             </div>
@@ -1044,7 +1051,7 @@ function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,on
         <tbody>{list.map(i=>(
           <tr key={i.id} className={selected.has(i.id)?'kf-row-selected':i.archived?'kf-row-archived':''}>
             <td onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selected.has(i.id)} onChange={()=>toggle(i.id)}/></td>
-            <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number}</strong></td>
+            <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number || (i.invoiceNumber ? `INV-${i.invoiceNumber}` : '—')}</strong></td>
             {showLoc&&<td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}
             <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className="kf-sub">{i.createdAt?.split('T')[0]||i.convertedAt?.split('T')[0]||'—'}</td>
             <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>${(i.finalTotal||i.total||0).toFixed(2)}</td>
