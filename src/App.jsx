@@ -94,6 +94,18 @@ async function decodeVIN(vin) {
   } catch (e) { return { success: false, error: e.message }; }
 }
 
+// Returns best available vehicle label — prefers stored fields, falls back to
+// invoice.vehicleStr (Shopmonkey import), then VIN decode result
+function getVehicleLabel(vehicle, invoice) {
+  if (vehicle) {
+    const ymm = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ');
+    if (ymm.trim()) return ymm;
+    if (vehicle.vin) return `VIN: ${vehicle.vin}`;
+  }
+  if (invoice?.vehicleStr && invoice.vehicleStr.trim()) return invoice.vehicleStr.trim();
+  return null;
+}
+
 // ─── API Layer ────────────────────────────────────────────────────────────────
 const API_URL = '';
 
@@ -2255,7 +2267,7 @@ function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOp
                           onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                           <td style={{padding:'12px 8px',fontSize:13,fontWeight:600,color:'#22c55e'}}>{inv.number||`INV-${inv.invoiceNumber||inv.id?.slice(-6)}`}</td>
                           <td style={{padding:'12px 8px',fontSize:13,color:'var(--muted,#94a3b8)'}}>{inv.createdAt?new Date(inv.createdAt).toLocaleDateString():inv.date||'—'}</td>
-                          <td style={{padding:'12px 8px',fontSize:13,color:'var(--text,#f1f5f9)'}}>{veh?`${veh.year} ${veh.make} ${veh.model}`:'—'}</td>
+                          <td style={{padding:'12px 8px',fontSize:13,color:'var(--text,#f1f5f9)'}}>{getVehicleLabel(veh,inv)||'—'}</td>
                           <td style={{padding:'12px 8px',fontSize:13,fontWeight:600,color:'var(--text,#f1f5f9)'}}>${(inv.finalTotal||inv.total||0).toFixed(2)}</td>
                           <td style={{padding:'12px 8px'}}>
                             <span style={{fontSize:11,fontWeight:600,padding:'3px 8px',borderRadius:4,background:statusColor(inv.status)+'22',color:statusColor(inv.status),textTransform:'uppercase',letterSpacing:'0.05em'}}>{inv.status}</span>
@@ -2321,6 +2333,14 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
   const [showPay,setShowPay]=useState(false);
   const [method,setMethod]=useState('card');
   const [amt,setAmt]=useState(invoice.balance);
+  const [decodedVeh,setDecodedVeh]=useState(null);
+
+  // Auto-decode VIN from NHTSA when vehicle record has empty year/make/model
+  useEffect(()=>{
+    const needsDecode = vehicle && vehicle.vin && !vehicle.year && !vehicle.make && !vehicle.model;
+    if (!needsDecode) return;
+    decodeVIN(vehicle.vin).then(r=>{ if(r.success) setDecodedVeh(r); });
+  },[vehicle?.vin]);
 
   const handlePrintInvoice = () => {
     const printWindow = window.open('', '_blank');
@@ -2569,7 +2589,7 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
 
   const canRevert = invoice.status === 'unpaid' && (!invoice.payments || invoice.payments.length === 0);
 
-  return <div className="kf-overlay" onClick={onClose}><div className="kf-modal" onClick={e=>e.stopPropagation()}><div className="kf-modal-header"><h2>{invoice.number}</h2><button className="kf-close" onClick={onClose}><X size={20}/></button></div><div className="kf-modal-body"><div className="kf-detail-header"><span className={`kf-badge ${invoice.status}`}>{invoice.status}</span><span className="kf-sub">Due: {invoice.dueAt}</span><button className="kf-btn secondary sm" onClick={handlePrintInvoice}><Printer size={14}/>Print</button>{invoice.status!=='paid'&&<button className="kf-btn success sm" onClick={()=>setShowPay(true)}><CreditCard size={14}/>Pay</button>}</div>{showPay&&<div className="kf-pay-form"><div className="kf-pay-methods">{['card','cash','check'].map(m=><div key={m} className={method===m?'active':''} onClick={()=>setMethod(m)}>{m==='card'?<CreditCard size={20}/>:<DollarSign size={20}/>}<span>{m}</span></div>)}</div><div className="kf-form-group"><label>Amount</label><input type="number" value={amt} onChange={e=>setAmt(+e.target.value||0)}/></div><div className="kf-row"><button className="kf-btn secondary" onClick={()=>setShowPay(false)}>Cancel</button><button className="kf-btn success" onClick={()=>{onPay({amount:amt,method,date:new Date().toISOString().split('T')[0]});setShowPay(false);}}><CheckCircle size={14}/>Confirm</button></div></div>}<p><strong>Customer:</strong> {getName(customer)}</p>{vehicle && <p><strong>Vehicle:</strong> {vehicle.year} {vehicle.make} {vehicle.model}</p>}{invoice.estimateNumber && <p className="kf-sub">From: {invoice.estimateNumber}</p>}<div className="kf-totals" style={{marginTop:16}}><div><span>Total</span><span>${(invoice.finalTotal||invoice.total||0).toFixed(2)}</span></div>{invoice.payments?.map((p,i)=><div key={i} className="green"><span>{p.date} ({p.method})</span><span>-${(p.amount||0).toFixed(2)}</span></div>)}<div className="total"><span>Balance</span><span className={invoice.balance>0?'red':'green'}>${(invoice.balance||0).toFixed(2)}</span></div></div></div><div className="kf-modal-footer">{canRevert && <button className="kf-btn secondary" onClick={() => { if(confirm('Revert to estimate? Invoice will be deleted.')) onRevert(); }}><ArrowLeft size={14}/>Revert to Estimate</button>}<button className="kf-btn secondary" onClick={onClose}>Close</button></div></div></div>;
+  return <div className="kf-overlay" onClick={onClose}><div className="kf-modal" onClick={e=>e.stopPropagation()}><div className="kf-modal-header"><h2>{invoice.number}</h2><button className="kf-close" onClick={onClose}><X size={20}/></button></div><div className="kf-modal-body"><div className="kf-detail-header"><span className={`kf-badge ${invoice.status}`}>{invoice.status}</span><span className="kf-sub">Due: {invoice.dueAt}</span><button className="kf-btn secondary sm" onClick={handlePrintInvoice}><Printer size={14}/>Print</button>{invoice.status!=='paid'&&<button className="kf-btn success sm" onClick={()=>setShowPay(true)}><CreditCard size={14}/>Pay</button>}</div>{showPay&&<div className="kf-pay-form"><div className="kf-pay-methods">{['card','cash','check'].map(m=><div key={m} className={method===m?'active':''} onClick={()=>setMethod(m)}>{m==='card'?<CreditCard size={20}/>:<DollarSign size={20}/>}<span>{m}</span></div>)}</div><div className="kf-form-group"><label>Amount</label><input type="number" value={amt} onChange={e=>setAmt(+e.target.value||0)}/></div><div className="kf-row"><button className="kf-btn secondary" onClick={()=>setShowPay(false)}>Cancel</button><button className="kf-btn success" onClick={()=>{onPay({amount:amt,method,date:new Date().toISOString().split('T')[0]});setShowPay(false);}}><CheckCircle size={14}/>Confirm</button></div></div>}<p><strong>Customer:</strong> {getName(customer)}</p>{(()=>{const vLabel=getVehicleLabel(decodedVeh?{...vehicle,...decodedVeh}:vehicle,invoice);return vLabel?<p><strong>Vehicle:</strong> {vLabel}{vehicle?.vin&&<span style={{color:'var(--muted,#64748b)',fontSize:12,marginLeft:8}}>({vehicle.vin})</span>}</p>:null;})()}{invoice.estimateNumber && <p className="kf-sub">From: {invoice.estimateNumber}</p>}<div className="kf-totals" style={{marginTop:16}}><div><span>Total</span><span>${(invoice.finalTotal||invoice.total||0).toFixed(2)}</span></div>{invoice.payments?.map((p,i)=><div key={i} className="green"><span>{p.date} ({p.method})</span><span>-${(p.amount||0).toFixed(2)}</span></div>)}<div className="total"><span>Balance</span><span className={invoice.balance>0?'red':'green'}>${(invoice.balance||0).toFixed(2)}</span></div></div></div><div className="kf-modal-footer">{canRevert && <button className="kf-btn secondary" onClick={() => { if(confirm('Revert to estimate? Invoice will be deleted.')) onRevert(); }}><ArrowLeft size={14}/>Revert to Estimate</button>}<button className="kf-btn secondary" onClick={onClose}>Close</button></div></div></div>;
 }
 
 // Customer/Vehicle selector component for estimate page
