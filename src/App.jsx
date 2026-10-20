@@ -2253,7 +2253,7 @@ function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOp
               : <table style={{width:'100%',borderCollapse:'collapse'}}>
                   <thead>
                     <tr style={{borderBottom:'1px solid rgba(255,255,255,0.07)'}}>
-                      {['Order #','Date','Vehicle','Total','Status'].map(h=>(
+                      {['Order #','Date','Vehicle','VIN','Total','Status'].map(h=>(
                         <th key={h} style={{padding:'12px 8px',textAlign:'left',fontSize:11,color:'var(--muted,#64748b)',textTransform:'uppercase',letterSpacing:'0.05em',fontWeight:500}}>{h}</th>
                       ))}
                     </tr>
@@ -2267,7 +2267,8 @@ function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOp
                           onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                           <td style={{padding:'12px 8px',fontSize:13,fontWeight:600,color:'#22c55e'}}>{inv.number||`INV-${inv.invoiceNumber||inv.id?.slice(-6)}`}</td>
                           <td style={{padding:'12px 8px',fontSize:13,color:'var(--muted,#94a3b8)'}}>{inv.createdAt?new Date(inv.createdAt).toLocaleDateString():inv.date||'—'}</td>
-                          <td style={{padding:'12px 8px',fontSize:13,color:'var(--text,#f1f5f9)'}}>{getVehicleLabel(veh,inv)||'—'}</td>
+                          <td style={{padding:'12px 8px',fontSize:13,color:'var(--text,#f1f5f9)'}}>{veh?[veh.year,veh.make,veh.model].filter(Boolean).join(' ')||inv.vehicleStr||'—':inv.vehicleStr||'—'}</td>
+                          <td style={{padding:'12px 8px',fontSize:12,color:'var(--muted,#94a3b8)',fontFamily:'monospace'}}>{veh?.vin||'—'}</td>
                           <td style={{padding:'12px 8px',fontSize:13,fontWeight:600,color:'var(--text,#f1f5f9)'}}>${(inv.finalTotal||inv.total||0).toFixed(2)}</td>
                           <td style={{padding:'12px 8px'}}>
                             <span style={{fontSize:11,fontWeight:600,padding:'3px 8px',borderRadius:4,background:statusColor(inv.status)+'22',color:statusColor(inv.status),textTransform:'uppercase',letterSpacing:'0.05em'}}>{inv.status}</span>
