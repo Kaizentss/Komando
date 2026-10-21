@@ -1104,6 +1104,158 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
     return {type:'allInvoices', rows:result, errors:[]};
   };
 
+  // Parser for Shopmonkey custom .txt export format:
+  // === INVOICE #XXXX ===
+  //   [N] SERVICE: <name> | Auth: ... | Service Total: $X
+  //       - Labor | <desc> | Qty X hr | Rate $X | Amount $X | Tech ...
+  //       - Part | <desc> | Qty X | Rate $X | Amount $X
+  const parseShopmonkeyTextExport = (text) => {
+    const invoiceBlocks = text.split(/=== INVOICE #(\d+) ===/g);
+    const rows = [];
+    // invoiceBlocks: [pre, num, body, num, body, ...]
+    for (let i = 1; i < invoiceBlocks.length; i += 2) {
+      const num = invoiceBlocks[i].trim();
+      const body = invoiceBlocks[i + 1] || '';
+      const lines = body.split('\n');
+
+      // Extract fields
+      const get = (key) => {
+        const line = lines.find(l => l.trim().startsWith(key + ':'));
+        return line ? line.slice(line.indexOf(':') + 1).trim() : '';
+      };
+
+      const statusRaw = get('Status').toLowerCase();
+      const status = statusRaw.includes('invoice') || statusRaw.includes('paid') ? 'paid' :
+                     statusRaw.includes('estimate') ? 'estimate' : 'paid';
+
+      const invoicedDate = get('Invoiced');
+      const createdDate = get('Created');
+      const dateStr = invoicedDate || createdDate || '';
+      // Parse M/D/YYYY → YYYY-MM-DD
+      let isoDate = '';
+      if (dateStr) {
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          isoDate = `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`;
+        }
+      }
+
+      const customerName = get('Customer');
+      const vehicleStr = get('Vehicle');
+      const vin = get('VIN');
+      const poNumber = get('PO Number');
+
+      // Parse vehicle year/make/model from vehicle string like "2024 Honda Accord EX"
+      let vehicleYear = '', vehicleMake = '', vehicleModel = '';
+      if (vehicleStr) {
+        const vparts = vehicleStr.trim().split(/\s+/);
+        vehicleYear = /^\d{4}$/.test(vparts[0]) ? vparts[0] : '';
+        vehicleMake = vehicleYear ? (vparts[1] || '') : (vparts[0] || '');
+        vehicleModel = vehicleYear ? vparts.slice(2).join(' ') : vparts.slice(1).join(' ');
+      }
+
+      // Parse total from --- TOTALS ---
+      const totalLine = lines.find(l => l.match(/^Total:\s*\$/));
+      const totalStr = totalLine ? totalLine.replace(/[^0-9.]/g, '') : '0';
+      const total = parseFloat(totalStr) || 0;
+
+      // Parse balance
+      const balanceLine = lines.find(l => l.match(/^Balance:\s*\$/));
+      const balanceStr = balanceLine ? balanceLine.replace(/[^0-9.]/g, '') : '0';
+      const balance = parseFloat(balanceStr) || 0;
+
+      // Parse line items: "    - Labor | desc | Qty X hr | Rate $X | Amount $X | Tech ..."
+      //                   "    - Part | desc | Qty X | Rate $X | Amount $X"
+      const items = [];
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('- Labor') && !trimmed.startsWith('- Part') && !trimmed.startsWith('- Fee')) continue;
+        const parts = trimmed.slice(2).split(' | ');
+        if (parts.length < 2) continue;
+        const typePart = parts[0].trim().toLowerCase();
+        const desc = parts[1]?.trim() || 'Service';
+        const itemType = typePart.startsWith('labor') ? 'labor' : typePart.startsWith('part') ? 'part' : 'fee';
+
+        const parseAmt = (seg) => parseFloat((seg || '').replace(/[^0-9.]/g, '')) || 0;
+        const findPart = (keyword) => parts.find(p => p.toLowerCase().startsWith(keyword.toLowerCase()));
+
+        const item = {
+          id: `i${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          description: desc,
+          type: itemType,
+          notes: '',
+        };
+
+        if (itemType === 'labor') {
+          // Qty X hr
+          const qtyPart = findPart('Qty');
+          const qty = qtyPart ? parseFloat(qtyPart.replace(/[^0-9.]/g, '')) || 0 : 0;
+          item.hours = Math.round(qty * 10000) / 10000;
+          // Rate $X
+          const ratePart = findPart('Rate');
+          item.rate = ratePart ? parseAmt(ratePart) : 0;
+        } else if (itemType === 'part') {
+          const qtyPart = findPart('Qty');
+          item.quantity = qtyPart ? parseFloat(qtyPart.replace(/[^0-9.]/g, '')) || 1 : 1;
+          // Use Rate as cost per part
+          const ratePart = findPart('Rate');
+          item.cost = ratePart ? parseAmt(ratePart) : 0;
+        } else {
+          // Fee: use Amount
+          const amtPart = findPart('Amount');
+          item.price = amtPart ? parseAmt(amtPart) : 0;
+        }
+
+        items.push(item);
+      }
+
+      // If no line items parsed, create a single fee from total
+      if (items.length === 0 && total > 0) {
+        items.push({
+          id: `i${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          description: 'Imported Services',
+          type: 'fee',
+          price: total,
+          notes: '',
+        });
+      }
+
+      // Parse payments
+      const payments = [];
+      let inPayments = false;
+      for (const line of lines) {
+        if (line.trim() === '--- PAYMENTS ---') { inPayments = true; continue; }
+        if (inPayments && line.trim().startsWith('---')) { inPayments = false; continue; }
+        if (inPayments && line.trim().startsWith('-')) {
+          const m = line.match(/\$([0-9,]+\.?\d*)/);
+          if (m) payments.push({ amount: parseFloat(m[1].replace(/,/g,''))||0, method: 'imported', date: isoDate });
+        }
+      }
+      if (payments.length === 0 && total > 0 && balance === 0) {
+        payments.push({ amount: total, method: 'imported', date: isoDate });
+      }
+
+      rows.push({
+        orderNum: num,
+        date: isoDate,
+        customerName,
+        vehicleStr,
+        vehicleYear,
+        vehicleMake,
+        vehicleModel,
+        vin,
+        poNumber,
+        status,
+        items,
+        total,
+        balance,
+        payments,
+      });
+    }
+    if (rows.length === 0) return { error: 'No invoices found in this file.' };
+    return { type: 'orders', rows, errors: [] };
+  };
+
   const parseShopmonkeyOrderLineItems = (workbook) => {
     const ws = workbook.Sheets[workbook.SheetNames[0]];
     const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
@@ -1200,6 +1352,18 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
         setImportPreview(result);
         return;
       }
+      // Shopmonkey custom .txt export
+      if (file.name.endsWith('.txt')) {
+        const text = await file.text();
+        if (!text.includes('=== INVOICE #')) {
+          notify('Unrecognized .txt format. Expected Shopmonkey invoice export.', 'error');
+          setImportFile(null); return;
+        }
+        const result = parseShopmonkeyTextExport(text);
+        if (result.error) { notify(result.error, 'error'); setImportFile(null); return; }
+        setImportPreview(result);
+        return;
+      }
       const buf = await file.arrayBuffer();
       const workbook = XLSX.read(buf, {type:'array'});
       const ws = workbook.Sheets[workbook.SheetNames[0]];
@@ -1273,45 +1437,60 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       }
 
       const getOrCreateVehicle = (order) => {
-        if (!order.vehicleStr) return null;
+        if (!order.vehicleStr && !order.vin) return null;
         const year  = order.vehicleYear  || '';
         const make  = order.vehicleMake  || '';
         const model = order.vehicleModel || '';
-        if (!year && !make) return null;
+        const vin   = order.vin || '';
         const cid = importAssignCustomerId || null;
+        // Prefer VIN-based dedup
+        if (vin) {
+          const vinKey = `vin|${vin.toLowerCase()}`;
+          if (vehicleCache.has(vinKey)) return vehicleCache.get(vinKey);
+          const vid = `v_sm_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+          newVehicles.push({ id: vid, customerId: cid, year, make, model, vin, plate: '', color: '', mileageIn: '', mileageOut: '', source: 'shopmonkey' });
+          vehicleCache.set(vinKey, vid);
+          if (year || make) vehicleCache.set(vehicleKey(cid, year, make, model), vid);
+          return vid;
+        }
+        if (!year && !make) return null;
         const key = vehicleKey(cid, year, make, model);
         if (vehicleCache.has(key)) return vehicleCache.get(key);
         const vid = `v_sm_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
-        newVehicles.push({
-          id: vid, customerId: cid,
-          year, make, model,
-          vin: '', plate: '', color: '', mileageIn: '', mileageOut: '',
-          source: 'shopmonkey',
-        });
+        newVehicles.push({ id: vid, customerId: cid, year, make, model, vin: '', plate: '', color: '', mileageIn: '', mileageOut: '', source: 'shopmonkey' });
         vehicleCache.set(key, vid);
         return vid;
+      };
+
+      // Auto-match customer by name if no explicit assignment
+      const matchCustomerByName = (name) => {
+        if (!name) return null;
+        const lower = name.toLowerCase().trim();
+        return customers.find(c => (c.companyName||'').toLowerCase().trim() === lower)?.id || null;
       };
 
       for (const order of importPreview.rows) {
         if (existingNums.has(order.orderNum)) { skipped++; continue; }
         const vehicleId = getOrCreateVehicle(order);
+        const customerId = importAssignCustomerId || matchCustomerByName(order.customerName) || null;
         newInvoices.push({
-          id: `inv_sm_${order.orderNum.replace('#','')}`,
+          id: `inv_sm_${order.orderNum.replace(/[^a-zA-Z0-9]/g,'')}`,
           number: order.orderNum,
-          status: 'paid',
+          status: order.status || 'paid',
           source: 'shopmonkey',
-          customerId: importAssignCustomerId || null,
+          customerId,
           vehicleId,
           vehicleStr: order.vehicleStr,
+          poNumber: order.poNumber || '',
           createdAt: order.date,
           convertedAt: order.date,
           items: order.items,
           subtotal: parseFloat(order.total)||0,
           tax: 0,
           finalTotal: parseFloat(order.total)||0,
-          balance: 0,
-          payments: [{amount: parseFloat(order.total)||0, method: 'imported', date: order.date||''}],
-          notes: `Imported from Shopmonkey. Vehicle: ${order.vehicleStr}`,
+          balance: parseFloat(order.balance)||0,
+          payments: order.payments && order.payments.length ? order.payments : [{amount: parseFloat(order.total)||0, method: 'imported', date: order.date||''}],
+          notes: order.vehicleStr ? `Imported from Shopmonkey. Vehicle: ${order.vehicleStr}` : 'Imported from Shopmonkey',
         });
         existingNums.add(order.orderNum);
         added++;
@@ -3308,7 +3487,8 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
     setTimeout(() => printWindow.print(), 250);
   };
 
-  const canEdit = doc.status === 'pending' || doc.status === 'approved';
+  // Allow editing: normal workflow (pending/approved) OR any imported invoice (to fix amounts)
+  const canEdit = doc.status === 'pending' || doc.status === 'approved' || doc.source === 'shopmonkey';
 
   return (
     <div className="kf-estimate-page">
@@ -3458,6 +3638,14 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
                     <div className="kf-add-item-bar"><span>Or add:</span><button onClick={() => addItem('labor')}><Clock size={14}/>Labor</button><button onClick={() => addItem('part')}><Package size={14}/>Part</button><button onClick={() => addItem('fee')}><Tag size={14}/>Fee</button></div>
                   </div>
                 )}
+                {(doc.items || []).length > 0 && (
+                  <div className="kf-service-col-header">
+                    <span className="kf-sch-desc">Description</span>
+                    <span className="kf-sch-qty">Qty / Hrs</span>
+                    <span className="kf-sch-rate">Rate</span>
+                    <span className="kf-sch-subtotal">Subtotal</span>
+                  </div>
+                )}
                 <div className="kf-line-items">
                   {(doc.items || []).length === 0 ? <div className="kf-empty-items">No items yet. Search canned items or add labor, parts, or fees above.</div> : (doc.items || []).map(item => (
                     <LineItem key={item.id} item={item} users={users} settings={settings} canEdit={canEdit} onUpdate={updateItem} onDelete={deleteItem}/>
@@ -3546,50 +3734,91 @@ function LineItem({item, users, settings, canEdit, onUpdate, onDelete}) {
   const TypeIcon = item.type === 'labor' ? Clock : item.type === 'part' ? Package : Tag;
   const total = calcItemTotal(item, settings.laborRate);
   const [showNotes, setShowNotes] = useState(!!(item.customerNote || item.internalNote));
+  const techName = users.find(u => u.id === item.technicianId)?.name;
+  const effectiveRate = item.rate || settings.laborRate;
 
-  if (!canEdit) {
-    return (
-      <div className="kf-line-item-wrap">
-        <div className="kf-line-item view">
-          <div className="kf-li-type"><TypeIcon size={16}/></div>
-          <div className="kf-li-desc">
-            {item.description || 'Untitled'}
-            {item.customerNote && <div className="kf-li-customer-note">{item.customerNote}</div>}
-          </div>
-          <div className="kf-li-details">{item.type === 'labor' && `${item.hours}h × $${item.rate || settings.laborRate}`}{item.type === 'part' && `${item.quantity} × $${item.cost}`}{item.type === 'fee' && 'Flat'}</div>
-          <div className="kf-li-tech">{users.find(u => u.id === item.technicianId)?.name || '-'}</div>
-          <div className="kf-li-total">${total.toFixed(2)}</div>
-        </div>
-      </div>
-    );
-  }
+  const qtyDisplay = item.type === 'labor' ? (item.hours || 0) : item.type === 'part' ? (item.quantity || 1) : '—';
+  const rateDisplay = item.type === 'labor' ? `$${effectiveRate}/hr` : item.type === 'part' ? `$${item.cost || 0}` : 'flat';
 
   return (
-    <div className="kf-line-item-wrap">
-      <div className="kf-line-item edit">
-        <div className="kf-li-type"><TypeIcon size={16}/></div>
-        <input className="kf-li-desc" value={item.description || ''} onChange={e => onUpdate(item.id, {description: e.target.value})} placeholder="Description..."/>
-        {item.type === 'labor' && (
-          <div className="kf-li-fields">
-            <div className="kf-field"><label>Hrs</label><input type="number" step="0.25" value={item.hours || ''} onChange={e => onUpdate(item.id, {hours: +e.target.value || 0})}/></div>
-            <div className="kf-field">
-              <label>Rate {item.rate > 0 && item.rate !== settings.laborRate && <button className="kf-rate-reset" title="Reset to location rate" onClick={() => onUpdate(item.id, {rate: 0})}>↺ {settings.laborRate}</button>}</label>
-              <input type="number" placeholder={settings.laborRate} value={item.rate || ''} onChange={e => onUpdate(item.id, {rate: +e.target.value || 0})}/>
-            </div>
-          </div>
+    <div className="kf-svc-block">
+      {/* Header row: type badge + service name + controls */}
+      <div className="kf-svc-header">
+        <div className="kf-svc-type-badge">
+          <TypeIcon size={13}/>
+          <span>{item.type}</span>
+        </div>
+        {canEdit ? (
+          <input
+            className="kf-svc-name-input"
+            value={item.description || ''}
+            onChange={e => onUpdate(item.id, {description: e.target.value})}
+            placeholder="Service description..."
+          />
+        ) : (
+          <span className="kf-svc-name">{item.description || 'Untitled'}</span>
         )}
-        {item.type === 'part' && <div className="kf-li-fields"><div className="kf-field"><label>Qty</label><input type="number" min="1" value={item.quantity || 1} onChange={e => onUpdate(item.id, {quantity: +e.target.value || 1})}/></div><div className="kf-field"><label>Cost</label><input type="number" step="0.01" value={item.cost || ''} onChange={e => onUpdate(item.id, {cost: +e.target.value || 0})}/></div></div>}
-        {item.type === 'fee' && <div className="kf-li-fields"><div className="kf-field"><label>Amt</label><input type="number" step="0.01" value={item.price || ''} onChange={e => onUpdate(item.id, {price: +e.target.value || 0})}/></div></div>}
-        <select className="kf-li-tech" value={item.technicianId || ''} onChange={e => onUpdate(item.id, {technicianId: e.target.value})}><option value="">Assign...</option>{users.filter(u => u.role === 'technician' || u.role === 'tech' || u.role === 'admin' || u.role === 'master_admin').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-        <div className="kf-li-total">${total.toFixed(2)}</div>
-        <button className={`kf-li-notes-btn${showNotes ? ' active' : ''}${(item.customerNote || item.internalNote) ? ' has-notes' : ''}`} title="Add notes" onClick={() => setShowNotes(s => !s)}><MessageSquare size={13}/></button>
-        <button className="kf-li-delete" onClick={() => onDelete(item.id)}><Trash2 size={14}/></button>
+        <div className="kf-svc-header-actions">
+          {canEdit && <button className={`kf-li-notes-btn${showNotes ? ' active' : ''}${(item.customerNote || item.internalNote) ? ' has-notes' : ''}`} title="Notes" onClick={() => setShowNotes(s => !s)}><MessageSquare size={13}/></button>}
+          {canEdit && <button className="kf-li-delete" onClick={() => onDelete(item.id)}><Trash2 size={14}/></button>}
+        </div>
       </div>
+
+      {/* Detail row: qty/hrs | rate | subtotal */}
+      <div className="kf-svc-detail-row">
+        <div className="kf-svc-detail-desc">
+          {item.customerNote && <div className="kf-li-customer-note">{item.customerNote}</div>}
+          {techName && <div className="kf-svc-tech"><span>Tech:</span> {techName}</div>}
+          {!item.customerNote && !techName && <span className="kf-svc-detail-placeholder">—</span>}
+        </div>
+        <div className="kf-svc-detail-qty">
+          {canEdit ? (
+            item.type === 'labor' ? (
+              <input type="number" step="0.25" min="0" value={item.hours || ''} onChange={e => onUpdate(item.id, {hours: +e.target.value || 0})} placeholder="0"/>
+            ) : item.type === 'part' ? (
+              <input type="number" min="1" value={item.quantity || 1} onChange={e => onUpdate(item.id, {quantity: +e.target.value || 1})}/>
+            ) : (
+              <span>—</span>
+            )
+          ) : (
+            <span>{qtyDisplay}</span>
+          )}
+        </div>
+        <div className="kf-svc-detail-rate">
+          {canEdit ? (
+            item.type === 'labor' ? (
+              <div className="kf-svc-rate-wrap">
+                <input type="number" step="0.01" placeholder={settings.laborRate} value={item.rate || ''} onChange={e => onUpdate(item.id, {rate: +e.target.value || 0})}/>
+                {item.rate > 0 && item.rate !== settings.laborRate && <button className="kf-rate-reset" title="Reset to shop rate" onClick={() => onUpdate(item.id, {rate: 0})}>↺</button>}
+              </div>
+            ) : item.type === 'part' ? (
+              <input type="number" step="0.01" value={item.cost || ''} onChange={e => onUpdate(item.id, {cost: +e.target.value || 0})} placeholder="0.00"/>
+            ) : (
+              <input type="number" step="0.01" value={item.price || ''} onChange={e => onUpdate(item.id, {price: +e.target.value || 0})} placeholder="0.00"/>
+            )
+          ) : (
+            <span>{rateDisplay}</span>
+          )}
+        </div>
+        <div className="kf-svc-detail-subtotal">${total.toFixed(2)}</div>
+      </div>
+
+      {/* Technician selector (edit mode only) */}
+      {canEdit && (
+        <div className="kf-svc-footer">
+          <select className="kf-svc-tech-select" value={item.technicianId || ''} onChange={e => onUpdate(item.id, {technicianId: e.target.value})}>
+            <option value="">Assign technician...</option>
+            {users.filter(u => u.role === 'technician' || u.role === 'tech' || u.role === 'admin' || u.role === 'master_admin').map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {/* Notes panel */}
       {showNotes && (
         <div className="kf-li-notes-panel">
           <div className="kf-li-note-row">
             <label><Eye size={12}/> Customer Note <span className="kf-note-hint">Visible on estimate/invoice</span></label>
-            <textarea rows={2} value={item.customerNote || ''} onChange={e => onUpdate(item.id, {customerNote: e.target.value})} placeholder="e.g. Programming BCM module, VIN: WD... — replaced with OEM unit"/>
+            <textarea rows={2} value={item.customerNote || ''} onChange={e => onUpdate(item.id, {customerNote: e.target.value})} placeholder="e.g. Programming BCM module — replaced with OEM unit"/>
           </div>
           <div className="kf-li-note-row internal">
             <label><EyeOff size={12}/> Internal Note <span className="kf-note-hint">Shop only — never printed</span></label>
