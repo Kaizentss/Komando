@@ -1118,7 +1118,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       const body = invoiceBlocks[i + 1] || '';
       const lines = body.split('\n');
 
-      // Extract fields
+      // Extract simple key: value fields
       const get = (key) => {
         const line = lines.find(l => l.trim().startsWith(key + ':'));
         return line ? line.slice(line.indexOf(':') + 1).trim() : '';
@@ -1128,22 +1128,31 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
       const status = statusRaw.includes('invoice') || statusRaw.includes('paid') ? 'paid' :
                      statusRaw.includes('estimate') ? 'estimate' : 'paid';
 
-      const invoicedDate = get('Invoiced');
-      const createdDate = get('Created');
-      const dateStr = invoicedDate || createdDate || '';
-      // Parse M/D/YYYY → YYYY-MM-DD
-      let isoDate = '';
-      if (dateStr) {
-        const parts = dateStr.split('/');
-        if (parts.length === 3) {
-          isoDate = `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`;
-        }
-      }
+      // Parse date helper: M/D/YYYY → YYYY-MM-DD
+      const toISO = (d) => {
+        if (!d) return '';
+        const parts = d.split('/');
+        if (parts.length === 3) return `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`;
+        return d;
+      };
 
-      const customerName = get('Customer');
-      const vehicleStr = get('Vehicle');
-      const vin = get('VIN');
-      const poNumber = get('PO Number');
+      const invoicedDate  = get('Invoiced');
+      const createdDate   = get('Created');
+      const completedDate = get('Completed');
+      const paymentDue    = get('Payment Due');
+      const paymentTerm   = get('Payment Term') || 'Net 45';
+      const isoDate       = toISO(invoicedDate || createdDate);
+      const isoCompleted  = toISO(completedDate);
+      const isoCreated    = toISO(createdDate);
+      const isoInvoiced   = toISO(invoicedDate);
+      const isoDue        = toISO(paymentDue);
+
+      const customerName  = get('Customer');
+      const customerType  = get('Customer Type');
+      const vehicleStr    = get('Vehicle');
+      const vin           = get('VIN');
+      const poNumber      = get('PO Number');
+      const serviceWriter = get('Service Writer');
 
       // Parse vehicle year/make/model from vehicle string like "2024 Honda Accord EX"
       let vehicleYear = '', vehicleMake = '', vehicleModel = '';
@@ -1154,21 +1163,38 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
         vehicleModel = vehicleYear ? vparts.slice(2).join(' ') : vparts.slice(1).join(' ');
       }
 
-      // Parse total from --- TOTALS ---
+      // Parse customer comments section
+      let customerComments = '';
+      let inComments = false;
+      for (const line of lines) {
+        const t = line.trim();
+        if (t === '--- CUSTOMER COMMENTS / COMPLAINT ---') { inComments = true; continue; }
+        if (inComments && t.startsWith('---')) { inComments = false; continue; }
+        if (inComments) customerComments += (customerComments ? '\n' : '') + line.trim();
+      }
+
+      // Parse totals
+      const parseAmt = (seg) => parseFloat((seg || '').replace(/[^0-9.]/g, '')) || 0;
       const totalLine = lines.find(l => l.match(/^Total:\s*\$/));
-      const totalStr = totalLine ? totalLine.replace(/[^0-9.]/g, '') : '0';
-      const total = parseFloat(totalStr) || 0;
-
-      // Parse balance
+      const total = totalLine ? parseAmt(totalLine) : 0;
       const balanceLine = lines.find(l => l.match(/^Balance:\s*\$/));
-      const balanceStr = balanceLine ? balanceLine.replace(/[^0-9.]/g, '') : '0';
-      const balance = parseFloat(balanceStr) || 0;
+      const balance = balanceLine ? parseAmt(balanceLine) : 0;
+      const laborLine = lines.find(l => l.match(/^Labor:\s*\$/));
+      const laborTotal = laborLine ? parseAmt(laborLine) : 0;
 
-      // Parse line items: "    - Labor | desc | Qty X hr | Rate $X | Amount $X | Tech ..."
-      //                   "    - Part | desc | Qty X | Rate $X | Amount $X"
+      // Parse line items, tracking current service group name
+      // [N] SERVICE: <name> | Auth: ... | Service Total: $X
+      // - Labor | desc | Qty X hr | Rate $X | Amount $X | Tech ...
       const items = [];
+      let currentServiceName = '';
       for (const line of lines) {
         const trimmed = line.trim();
+        // Detect service group header
+        const svcMatch = trimmed.match(/^\[\d+\]\s+SERVICE:\s+(.+?)\s*\|/);
+        if (svcMatch) {
+          currentServiceName = svcMatch[1].trim();
+          continue;
+        }
         if (!trimmed.startsWith('- Labor') && !trimmed.startsWith('- Part') && !trimmed.startsWith('- Fee')) continue;
         const parts = trimmed.slice(2).split(' | ');
         if (parts.length < 2) continue;
@@ -1176,32 +1202,34 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
         const desc = parts[1]?.trim() || 'Service';
         const itemType = typePart.startsWith('labor') ? 'labor' : typePart.startsWith('part') ? 'part' : 'fee';
 
-        const parseAmt = (seg) => parseFloat((seg || '').replace(/[^0-9.]/g, '')) || 0;
         const findPart = (keyword) => parts.find(p => p.toLowerCase().startsWith(keyword.toLowerCase()));
+
+        // Tech name is last pipe segment if it doesn't look like $X
+        const techPart = parts[parts.length - 1]?.trim();
+        const techName = (techPart && !techPart.match(/^\$/)) ? techPart : '';
 
         const item = {
           id: `i${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-          description: desc,
+          description: currentServiceName || desc,
           type: itemType,
           notes: '',
+          serviceName: currentServiceName || desc,
+          laborDescription: desc,
+          techName,
         };
 
         if (itemType === 'labor') {
-          // Qty X hr
           const qtyPart = findPart('Qty');
           const qty = qtyPart ? parseFloat(qtyPart.replace(/[^0-9.]/g, '')) || 0 : 0;
           item.hours = Math.round(qty * 10000) / 10000;
-          // Rate $X
           const ratePart = findPart('Rate');
           item.rate = ratePart ? parseAmt(ratePart) : 0;
         } else if (itemType === 'part') {
           const qtyPart = findPart('Qty');
           item.quantity = qtyPart ? parseFloat(qtyPart.replace(/[^0-9.]/g, '')) || 1 : 1;
-          // Use Rate as cost per part
           const ratePart = findPart('Rate');
           item.cost = ratePart ? parseAmt(ratePart) : 0;
         } else {
-          // Fee: use Amount
           const amtPart = findPart('Amount');
           item.price = amtPart ? parseAmt(amtPart) : 0;
         }
@@ -1209,7 +1237,7 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
         items.push(item);
       }
 
-      // If no line items parsed, create a single fee from total
+      // Fallback: single fee from total
       if (items.length === 0 && total > 0) {
         items.push({
           id: `i${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
@@ -1220,36 +1248,77 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
         });
       }
 
-      // Parse payments
+      // Parse payments with date and method
       const payments = [];
       let inPayments = false;
       for (const line of lines) {
         if (line.trim() === '--- PAYMENTS ---') { inPayments = true; continue; }
         if (inPayments && line.trim().startsWith('---')) { inPayments = false; continue; }
         if (inPayments && line.trim().startsWith('-')) {
-          const m = line.match(/\$([0-9,]+\.?\d*)/);
-          if (m) payments.push({ amount: parseFloat(m[1].replace(/,/g,''))||0, method: 'imported', date: isoDate });
+          // Format: - MM/DD/YYYY, H:MM PM | Method | ... | $X | Check #... | ...
+          const amtMatch = line.match(/\$([0-9,]+\.?\d*)/);
+          if (!amtMatch) continue;
+          const amt = parseFloat(amtMatch[1].replace(/,/g,'')) || 0;
+          const segs = line.trim().slice(2).split(' | ');
+          // First seg: "MM/DD/YYYY, H:MM PM"
+          const dateRaw = segs[0]?.split(',')[0]?.trim() || '';
+          const payDate = toISO(dateRaw) || isoDate;
+          // Second seg: method
+          const rawMethod = segs[1]?.trim().toLowerCase() || 'check';
+          const method = rawMethod === 'check' ? 'check' : rawMethod === 'credit card' ? 'card' : rawMethod === 'cash' ? 'cash' : rawMethod;
+          // Check number if present
+          const checkSeg = segs.find(s => s.trim().startsWith('Check #'));
+          const checkNum = checkSeg ? checkSeg.replace('Check #','').trim() : '';
+          payments.push({ amount: amt, method, date: payDate, checkNumber: checkNum });
         }
       }
       if (payments.length === 0 && total > 0 && balance === 0) {
-        payments.push({ amount: total, method: 'imported', date: isoDate });
+        payments.push({ amount: total, method: 'check', date: isoDate });
+      }
+
+      // Parse authorizations
+      const authorizations = [];
+      let inAuth = false;
+      for (const line of lines) {
+        if (line.trim() === '--- AUTHORIZATIONS ---') { inAuth = true; continue; }
+        if (inAuth && line.trim().startsWith('---')) { inAuth = false; continue; }
+        if (inAuth && line.trim().startsWith('-')) {
+          // - MM/DD/YYYY, H:MM PM | InPerson | $X
+          const segs = line.trim().slice(2).split(' | ');
+          const dateRaw = segs[0]?.split(',')[0]?.trim() || '';
+          const authDate = toISO(dateRaw) || isoDate;
+          const authType = segs[1]?.trim() || 'InPerson';
+          const amtMatch = line.match(/\$([0-9,]+\.?\d*)/);
+          const amt = amtMatch ? parseFloat(amtMatch[1].replace(/,/g,'')) || 0 : 0;
+          authorizations.push({ date: authDate, type: authType, amount: amt });
+        }
       }
 
       rows.push({
         orderNum: num,
         date: isoDate,
+        createdAt: isoCreated,
+        invoicedAt: isoInvoiced,
+        completedAt: isoCompleted,
+        dueAt: isoDue,
+        paymentTerm,
         customerName,
+        customerType,
         vehicleStr,
         vehicleYear,
         vehicleMake,
         vehicleModel,
         vin,
         poNumber,
+        serviceWriter,
         status,
+        customerComments,
         items,
         total,
+        laborTotal,
         balance,
         payments,
+        authorizations,
       });
     }
     if (rows.length === 0) return { error: 'No invoices found in this file.' };
@@ -1482,14 +1551,22 @@ function SettingsView({settings,setSettings,users,setUsers,locations,setLocation
           vehicleId,
           vehicleStr: order.vehicleStr,
           poNumber: order.poNumber || '',
-          createdAt: order.date,
-          convertedAt: order.date,
+          paymentTerm: order.paymentTerm || 'Net 45',
+          serviceWriter: order.serviceWriter || '',
+          createdAt: order.createdAt || order.date,
+          invoicedAt: order.invoicedAt || order.date,
+          completedAt: order.completedAt || '',
+          convertedAt: order.invoicedAt || order.date,
+          dueAt: order.dueAt || '',
+          customerComments: order.customerComments || '',
           items: order.items,
           subtotal: parseFloat(order.total)||0,
+          laborTotal: parseFloat(order.laborTotal)||parseFloat(order.total)||0,
           tax: 0,
           finalTotal: parseFloat(order.total)||0,
           balance: parseFloat(order.balance)||0,
-          payments: order.payments && order.payments.length ? order.payments : [{amount: parseFloat(order.total)||0, method: 'imported', date: order.date||''}],
+          payments: order.payments && order.payments.length ? order.payments : [{amount: parseFloat(order.total)||0, method: 'check', date: order.date||''}],
+          authorizations: order.authorizations || [],
           notes: order.vehicleStr ? `Imported from Shopmonkey. Vehicle: ${order.vehicleStr}` : 'Imported from Shopmonkey',
         });
         existingNums.add(order.orderNum);
@@ -2475,243 +2552,242 @@ function InvoiceDetail({invoice, customer, vehicle, settings, users, getName, on
   const handlePrintInvoice = () => {
     const printWindow = window.open('', '_blank');
     const subtotal = invoice.subtotal || invoice.total || 0;
-    const discount = invoice.discount || 0;
+    const laborTotal = invoice.laborTotal || subtotal;
     const discPct = customer?.discount || 0;
     const tax = invoice.tax || 0;
     const finalTotal = invoice.finalTotal || invoice.total || 0;
-    
-    const itemsHtml = (invoice.items || []).map(item => {
-      const itemTotal = item.type === 'labor' ? (item.hours || 0) * (item.rate || settings.laborRate) :
-                        item.type === 'part' ? (item.quantity || 1) * (item.cost || 0) :
-                        item.price || 0;
-      const details = item.type === 'labor' ? `${item.hours}h × $${item.rate || settings.laborRate}/hr` :
-                      item.type === 'part' ? `${item.quantity} × $${(item.cost || 0).toFixed(2)}` :
-                      'Flat fee';
-      const noteRow = item.customerNote ? `<tr class="item-note-row"><td colspan="4" style="padding:2px 8px 8px 8px;color:#888;font-size:11px;font-style:italic">${item.customerNote}</td></tr>` : '';
-      return `<tr>
-        <td>${item.description || 'Untitled'}</td>
-        <td style="text-transform:capitalize">${item.type}</td>
-        <td>${details}</td>
-        <td style="text-align:right">$${itemTotal.toFixed(2)}</td>
-      </tr>${noteRow}`;
-    }).join('');
+    const balanceAmt = invoice.balance || 0;
+    const balanceColor = balanceAmt > 0 ? '#c0392b' : '#27ae60';
 
-    const paymentsHtml = (invoice.payments || []).map(p => 
-      `<tr class="payment"><td colspan="3">${p.date} - Payment (${p.method})</td><td style="text-align:right;color:green">-$${(p.amount||0).toFixed(2)}</td></tr>`
-    ).join('');
-
-    // Build itemsHtml grouped by description (no grouping key yet, just render as service blocks)
-    const creatorName = users.find(u => u.id === invoice.createdBy)?.name || 'Staff';
-    const custAddr = customer ? [customer.address, customer.city && customer.state ? customer.city+', '+customer.state+' '+customer.zip : (customer.city||customer.state||'')].filter(Boolean).join('<br>') : '';
+    const creatorName = invoice.serviceWriter || users.find(u => u.id === invoice.createdBy)?.name || 'Staff';
+    const custAddr = customer ? [
+      customer.address,
+      [customer.city, customer.state ? customer.state + (customer.zip ? ' ' + customer.zip : '') : customer.zip].filter(Boolean).join(', ')
+    ].filter(Boolean).join(', ') : '';
     const payTerm = invoice.paymentTerm || 'Net 30';
     const poNum = invoice.poNumber || '';
 
-    const paymentsTableHtml = (invoice.payments || []).length > 0 ? `
-      <div class="payments-section">
-        <table class="payments-table">
-          <thead><tr><th>Date</th><th>Method</th><th style="text-align:right">Amount</th></tr></thead>
+    // Format date helper
+    const fmtDate = (d) => {
+      if (!d) return '';
+      // ISO → M/D/YYYY
+      if (d.includes('-')) {
+        const [y,m,day] = d.split('-');
+        return `${parseInt(m)}/${parseInt(day)}/${y}`;
+      }
+      return d;
+    };
+
+    // Group items by serviceName (service block header)
+    const items = invoice.items || [];
+    const grouped = [];
+    const seen = new Map();
+    for (const item of items) {
+      const key = item.serviceName || item.description || 'Service';
+      if (!seen.has(key)) { seen.set(key, []); grouped.push({name: key, items: seen.get(key)}); }
+      seen.get(key).push(item);
+    }
+
+    const calcItem = (item) =>
+      item.type === 'labor' ? (item.hours||0) * (item.rate||settings.laborRate) :
+      item.type === 'part'  ? (item.quantity||1) * (item.cost||0) : (item.price||0);
+
+    const serviceSectionsHtml = grouped.map(grp => {
+      const grpTotal = grp.items.reduce((s, it) => s + calcItem(it), 0);
+      const rowsHtml = grp.items.map(item => {
+        const total = calcItem(item);
+        const hrsDisplay = item.type === 'labor' ? (item.hours||0).toString() :
+                           item.type === 'part'  ? `Qty ${item.quantity||1}` : '—';
+        const labelDisplay = item.laborDescription || item.description || 'Service';
+        const typeLabel = item.type === 'labor' ? 'Labor' : item.type === 'part' ? 'Part' : 'Fee';
+        return `<tr>
+          <td class="svc-td-desc">${typeLabel}: ${labelDisplay}${item.customerNote ? `<br><span class="note">${item.customerNote}</span>` : ''}</td>
+          <td class="svc-td-hrs">${hrsDisplay}</td>
+          <td class="svc-td-amt">$${total.toFixed(2)}</td>
+        </tr>`;
+      }).join('');
+      return `
+        <div class="svc-block">
+          <div class="svc-hdr">${grp.name}</div>
+          <table class="svc-tbl">
+            <thead><tr><th class="svc-th-desc">Description</th><th class="svc-th-hrs">HRS</th><th class="svc-th-amt">Subtotal</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+          <div class="svc-subtotal">Subtotal: $${grpTotal.toFixed(2)}</div>
+        </div>`;
+    }).join('');
+
+    const paidToDate = (invoice.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
+    const discAmt = discPct > 0 ? subtotal * (discPct/100) : 0;
+    const shopSupplies = invoice.shopSupplies || 0;
+    const epa = invoice.epa || 0;
+
+    const paymentsHtml = (invoice.payments||[]).length > 0 ? `
+      <div class="pay-section">
+        <div class="section-title">Payments</div>
+        <table class="pay-tbl">
           <tbody>
-            ${(invoice.payments||[]).map(p=>`<tr><td>${p.date}</td><td style="text-transform:capitalize">${p.method}</td><td style="text-align:right">$${(p.amount||0).toFixed(2)}</td></tr>`).join('')}
-            <tr class="pay-total"><td colspan="2"><strong>Total Payments</strong></td><td style="text-align:right"><strong>$${(invoice.payments||[]).reduce((s,p)=>s+p.amount,0).toFixed(2)}</strong></td></tr>
+            ${(invoice.payments||[]).map(p=>`<tr><td>${fmtDate(p.date)}</td><td style="text-transform:capitalize">${p.method}${p.checkNumber?' #'+p.checkNumber:''}</td><td class="pay-amt">$${(p.amount||0).toFixed(2)}</td></tr>`).join('')}
+            <tr class="pay-total-row"><td colspan="2"><strong>Total Payments</strong></td><td class="pay-amt"><strong>$${paidToDate.toFixed(2)}</strong></td></tr>
           </tbody>
         </table>
       </div>` : '';
 
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Invoice ${invoice.number}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; font-size: 13px; color: #222; max-width: 820px; margin: 0 auto; padding: 36px; }
-          /* Header */
-          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 2px solid #e63946; }
-          .shop-block .shop-name { font-size: 18px; font-weight: bold; color: #111; }
-          .shop-block .shop-detail { font-size: 12px; color: #555; line-height: 1.6; margin-top: 4px; }
-          .inv-block { text-align: right; }
-          .inv-block .inv-title { font-size: 32px; font-weight: bold; color: #111; }
-          .inv-block .inv-meta { font-size: 12px; color: #444; line-height: 1.8; margin-top: 4px; }
-          .inv-block .inv-meta strong { color: #111; }
-          /* Parties */
-          .parties { display: flex; gap: 32px; margin-bottom: 24px; }
-          .party { flex: 1; }
-          .party-label { font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin-bottom: 6px; }
-          .party-name { font-size: 15px; font-weight: bold; color: #111; margin-bottom: 3px; }
-          .party-detail { font-size: 12px; color: #555; line-height: 1.6; }
-          /* Vehicle */
-          .vehicle-box { background: #f7f7f7; border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px 18px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; }
-          .vehicle-make { font-size: 15px; font-weight: bold; color: #111; margin-bottom: 4px; }
-          .vehicle-fields { display: flex; flex-wrap: wrap; gap: 16px; }
-          .vehicle-field { font-size: 12px; color: #555; }
-          .vehicle-field span { color: #888; font-size: 11px; display: block; }
-          /* Comments */
-          .comments-box { border: 1px solid #ddd; border-radius: 4px; padding: 12px 14px; margin-bottom: 24px; font-size: 12px; color: #444; }
-          .comments-label { font-weight: bold; font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 6px; }
-          /* Service sections */
-          .service-section { margin-bottom: 20px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
-          .service-header { background: #f0f0f0; padding: 10px 14px; font-weight: bold; font-size: 13px; border-bottom: 1px solid #ddd; }
-          .service-table { width: 100%; border-collapse: collapse; }
-          .service-table th { background: #fafafa; padding: 8px 14px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #666; border-bottom: 1px solid #e8e8e8; }
-          .service-table td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
-          .service-table tr:last-child td { border-bottom: none; }
-          .service-note { font-size: 11px; color: #777; font-style: italic; margin-top: 3px; }
-          .service-footer { display: flex; justify-content: flex-end; gap: 24px; padding: 10px 14px; border-top: 1px solid #ddd; background: #fafafa; font-size: 12px; color: #555; }
-          .service-footer strong { color: #111; }
-          /* Totals */
-          .totals-wrap { display: flex; justify-content: flex-end; margin-bottom: 24px; }
-          .totals { width: 280px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
-          .total-row { display: flex; justify-content: space-between; padding: 8px 14px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
-          .total-row:last-child { border-bottom: none; }
-          .total-row.grand { font-size: 15px; font-weight: bold; background: #f0f0f0; }
-          .total-row.balance-row { font-size: 14px; font-weight: bold; color: ${((invoice.balance||0) > 0) ? '#c0392b' : '#27ae60'}; }
-          /* Warranty */
-          .warranty { border: 1px solid #ddd; border-radius: 4px; padding: 14px 18px; margin-bottom: 24px; font-size: 11px; color: #555; line-height: 1.6; }
-          .warranty-title { font-weight: bold; font-size: 12px; color: #333; margin-bottom: 8px; }
-          /* Signature */
-          .signature-line { margin-bottom: 24px; }
-          .sig-label { font-size: 12px; font-weight: bold; margin-bottom: 8px; }
-          .sig-box { border-bottom: 1px solid #333; width: 280px; height: 32px; }
-          /* Payments */
-          .payments-section { margin-bottom: 24px; }
-          .payments-section h4 { font-size: 13px; font-weight: bold; margin-bottom: 8px; }
-          .payments-table { width: 100%; border-collapse: collapse; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; font-size: 13px; }
-          .payments-table th { background: #f0f0f0; padding: 8px 14px; text-align: left; font-size: 11px; text-transform: uppercase; color: #666; }
-          .payments-table td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; }
-          .payments-table tr.pay-total td { background: #fafafa; border-top: 1px solid #ddd; border-bottom: none; }
-          /* Footer */
-          .footer { text-align: center; font-size: 11px; color: #888; padding-top: 16px; border-top: 1px solid #ddd; }
-          @media print { body { padding: 20px; } }
-        </style>
-      </head>
-      <body>
-        <!-- Header -->
-        <div class="header">
-          <div class="shop-block">
-            <div class="shop-name">${settings.shopName}</div>
-            <div class="shop-detail">
-              ${settings.address ? settings.address+'<br>' : ''}
-              ${settings.phone}<br>
-              ${settings.email}${settings.website ? '<br>'+settings.website : ''}
-            </div>
-          </div>
-          <div class="inv-block">
-            <div class="inv-title">Invoice ${invoice.number}</div>
-            <div class="inv-meta">
-              <div>Created: <strong>${invoice.createdAt || ''}</strong></div>
-              <div>Invoiced: <strong>${invoice.convertedAt || ''}</strong></div>
-              <div>Payment Term: <strong>${payTerm}</strong></div>
-              <div>Payment Due: <strong>${invoice.dueAt || ''}</strong></div>
-              <div>Service Writer: <strong>${creatorName}</strong></div>
-              ${poNum ? `<div>PO #: <strong>${poNum}</strong></div>` : ''}
-            </div>
-          </div>
-        </div>
+    const authHtml = (invoice.authorizations||[]).length > 0 ? `
+      <div class="pay-section">
+        <div class="section-title">Authorizations</div>
+        <table class="pay-tbl">
+          <tbody>
+            ${(invoice.authorizations||[]).map(a=>`<tr><td>${fmtDate(a.date)}</td><td style="text-transform:capitalize">${a.type||'In Person'} by ${customer ? getName(customer) : ''}</td><td class="pay-amt">$${(a.amount||0).toFixed(2)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : '';
 
-        <!-- Parties + Vehicle -->
-        <div class="parties">
-          <div class="party">
-            <div class="party-label">Bill To</div>
-            <div class="party-name">${customer ? getName(customer) : 'N/A'}</div>
-            <div class="party-detail">
-              ${customer ? getName(customer) : ''}<br>
-              ${custAddr}<br>
-              ${customer?.phone || customer?.phones?.[0] || ''}<br>
-              ${customer?.email || customer?.emails?.[0] || ''}
-            </div>
-          </div>
-          <div class="party">
-            <div class="party-label">Vehicle</div>
-            ${vehicle ? `
-              <div class="party-name">${vehicle.year} ${vehicle.make} ${vehicle.model}</div>
-              <div class="party-detail">
-                VIN: ${vehicle.vin || 'N/A'}<br>
-                License Plate: ${vehicle.plate || 'N/A'}
-                ${vehicle.mileageIn != null ? '<br>Mileage In: '+vehicle.mileageIn.toLocaleString()+' mi' : ''}
-                ${vehicle.mileageOut != null ? '<br>Mileage Out: '+vehicle.mileageOut.toLocaleString()+' mi' : ''}
-              </div>
-            ` : '<div class="party-detail">No vehicle</div>'}
-          </div>
-        </div>
+    const warrantyDefault = `${settings.shopName} certifies that diagnostic tests and calibration of the vehicle's sensors were completed at the repair facility on the date indicated above. ${settings.shopName} guarantees that the final diagnostic tests confirm the vehicle's sensors were calibrated to meet the manufacturer's specifications. However, ${settings.shopName} does not provide any warranty or make any assurances once the vehicle departs from the repair facility. ${settings.shopName} relied on the repair facility's confirmation that the vehicle remained unmodified from its original OEM specifications before the diagnostic tests and calibration were conducted. Any modifications to the vehicle will automatically void this warranty.<br><br>It is the responsibility of the repair facility or vehicle owner to ensure that replacement modules or components requiring programming, encoding, or configuration are compatible and correctly matched to the vehicle's hardware and/or software specifications where applicable.`;
 
-        <!-- Customer comments -->
-        ${invoice.customerComments ? `
-          <div class="comments-box">
-            <div class="comments-label">Customer Comments</div>
-            ${invoice.customerComments}
-          </div>` : ''}
+    const vehicleName = vehicle ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ') : (invoice.vehicleStr || '');
 
-        <!-- Line items as service sections -->
-        ${(invoice.items || []).map(item => {
-          const itemTotal = item.type==='labor' ? (item.hours||0)*(item.rate||settings.laborRate) :
-                            item.type==='part'  ? (item.quantity||1)*(item.cost||0) : (item.price||0);
-          const details = item.type==='labor' ? `${(item.hours||0).toFixed(4)}h × $${item.rate||settings.laborRate}/hr` :
-                          item.type==='part'  ? `Qty ${item.quantity||1} × $${(item.cost||0).toFixed(2)}` : 'Flat fee';
-          const discAmt = discPct > 0 && !customer?.taxExempt ? itemTotal * (discPct/100) : 0;
-          const itemNet = itemTotal - discAmt;
-          return `
-            <div class="service-section">
-              <div class="service-header">${item.description || 'Service'}</div>
-              <table class="service-table">
-                <thead><tr><th>#</th><th>Description</th><th style="text-align:right">Subtotal</th></tr></thead>
-                <tbody>
-                  <tr>
-                    <td>1</td>
-                    <td>
-                      ${item.description || 'Service'}
-                      ${item.customerNote ? `<div class="service-note">${item.customerNote}</div>` : ''}
-                      <div class="service-note">${details}</div>
-                    </td>
-                    <td style="text-align:right">$${itemTotal.toFixed(2)}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <div class="service-footer">
-                ${discAmt > 0 ? `<span>Discount (${discPct}%): <strong>$${discAmt.toFixed(2)}</strong></span>` : ''}
-                <span>Total: <strong>$${itemNet.toFixed(2)}</strong></span>
-              </div>
-            </div>`;
-        }).join('')}
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Invoice #${invoice.number}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #222; max-width: 820px; margin: 0 auto; padding: 32px; }
+    /* Header */
+    .hdr { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; }
+    .hdr-left .shop-name { font-size:16px; font-weight:bold; color:#111; }
+    .hdr-left .shop-contact { font-size:11px; color:#555; margin-top:3px; line-height:1.6; }
+    .hdr-right { text-align:right; }
+    .hdr-right .inv-num { font-size:20px; font-weight:bold; color:#111; }
+    .hdr-right .inv-meta { font-size:11px; color:#444; line-height:1.8; margin-top:4px; }
+    /* Divider */
+    .divider { border:none; border-top:1px solid #ddd; margin:16px 0; }
+    /* Parties row */
+    .parties { display:flex; gap:40px; margin-bottom:16px; }
+    .party-name { font-size:14px; font-weight:bold; color:#111; margin-bottom:2px; }
+    .party-detail { font-size:11px; color:#555; line-height:1.6; }
+    /* Comments */
+    .comments-box { margin-bottom:16px; font-size:12px; color:#444; }
+    .comments-label { font-weight:bold; font-size:11px; margin-bottom:4px; }
+    /* Service blocks */
+    .svc-block { margin-bottom:14px; }
+    .svc-hdr { font-size:13px; font-weight:bold; color:#333; padding:7px 0; margin-bottom:0; }
+    .svc-tbl { width:100%; border-collapse:collapse; }
+    .svc-tbl th { font-size:10px; text-transform:uppercase; color:#666; padding:5px 0; border-bottom:1px solid #ddd; }
+    .svc-th-desc { text-align:left; }
+    .svc-th-hrs, .svc-th-amt { text-align:right; width:70px; }
+    .svc-tbl td { padding:7px 0; font-size:12px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
+    .svc-td-desc { }
+    .svc-td-hrs, .svc-td-amt { text-align:right; }
+    .svc-subtotal { text-align:right; font-size:11px; color:#555; padding:5px 0 10px; border-top:1px solid #ddd; margin-top:0; }
+    .note { font-size:10px; color:#888; font-style:italic; }
+    /* Bottom layout: warranty left, totals right */
+    .bottom-wrap { display:flex; gap:24px; align-items:flex-start; margin-top:8px; margin-bottom:20px; }
+    .warranty-block { flex:1; font-size:10px; color:#555; line-height:1.6; }
+    .warranty-title { font-weight:bold; font-size:11px; color:#333; margin-bottom:6px; }
+    .totals-box { width:260px; flex-shrink:0; }
+    .tot-row { display:flex; justify-content:space-between; padding:5px 0; font-size:12px; border-bottom:1px solid #f0f0f0; }
+    .tot-row:last-child { border-bottom:none; }
+    .tot-grand { font-weight:bold; font-size:13px; }
+    .tot-balance { font-weight:bold; font-size:14px; color:${balanceColor}; border-top:2px solid #ddd; margin-top:4px; padding-top:6px; }
+    /* Signature */
+    .sig-section { margin-bottom:20px; }
+    .sig-label { font-size:12px; font-weight:bold; margin-bottom:8px; }
+    .sig-line { border-bottom:1px solid #333; width:280px; height:28px; }
+    /* Payments & auth */
+    .pay-section { margin-bottom:16px; }
+    .section-title { font-size:12px; font-weight:bold; margin-bottom:6px; }
+    .pay-tbl { width:100%; border-collapse:collapse; font-size:12px; }
+    .pay-tbl td { padding:7px 0; border-bottom:1px solid #f0f0f0; }
+    .pay-amt { text-align:right; }
+    .pay-total-row td { border-top:1px solid #ddd; border-bottom:none; background:#fafafa; }
+    /* Footer */
+    .footer { text-align:center; font-size:10px; color:#999; padding-top:14px; border-top:1px solid #ddd; }
+    @media print { body { padding:20px; } }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="hdr">
+    <div class="hdr-left">
+      <div class="shop-name">${settings.shopName}</div>
+      <div class="shop-contact">${settings.phone ? settings.phone+'<br>' : ''}${settings.email || ''}</div>
+    </div>
+    <div class="hdr-right">
+      <div class="inv-num">Invoice #${invoice.number}</div>
+      <div class="inv-meta">
+        ${invoice.createdAt ? `<div>Created: ${fmtDate(invoice.createdAt)}</div>` : ''}
+        ${invoice.completedAt ? `<div>Completed: ${fmtDate(invoice.completedAt)}</div>` : ''}
+        ${invoice.invoicedAt || invoice.convertedAt ? `<div>Invoiced: ${fmtDate(invoice.invoicedAt||invoice.convertedAt)}</div>` : ''}
+        ${payTerm ? `<div>Payment Term: ${payTerm}</div>` : ''}
+        ${invoice.dueAt ? `<div>Payment Due: ${fmtDate(invoice.dueAt)}</div>` : ''}
+        <div>Service Writer: ${creatorName}</div>
+        ${poNum ? `<div>PO #: ${poNum}</div>` : ''}
+      </div>
+    </div>
+  </div>
+  <hr class="divider">
 
-        <!-- Totals -->
-        <div class="totals-wrap">
-          <div class="totals">
-            <div class="total-row"><span>Labor</span><span>$${subtotal.toFixed(2)}</span></div>
-            <div class="total-row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
-            ${discount > 0 ? `<div class="total-row"><span>Discount</span><span>$${discount.toFixed(2)}</span></div>` : ''}
-            <div class="total-row"><span>Shop Supplies</span><span>$0.00</span></div>
-            <div class="total-row"><span>EPA</span><span>$0.00</span></div>
-            ${customer?.taxExempt ? `<div class="total-row"><span>Tax</span><span>$0.00</span></div>` : `<div class="total-row"><span>Tax (${invoice.taxRate||settings.taxRate}%)</span><span>$${tax.toFixed(2)}</span></div>`}
-            <div class="total-row grand"><span>Grand Total</span><span>$${finalTotal.toFixed(2)}</span></div>
-            ${(invoice.payments||[]).length > 0 ? `<div class="total-row"><span>Paid to Date</span><span>($${(invoice.payments||[]).reduce((s,p)=>s+p.amount,0).toFixed(2)})</span></div>` : ''}
-            <div class="total-row balance-row"><span>REMAINING BALANCE</span><span>$${(invoice.balance||0).toFixed(2)}</span></div>
-          </div>
-        </div>
+  <!-- Customer + Vehicle -->
+  <div class="parties">
+    <div>
+      <div class="party-name">${customer ? getName(customer) : 'Customer'}</div>
+      <div class="party-detail">
+        ${custAddr ? custAddr+'<br>' : ''}
+        ${(customer?.phones?.[0]||customer?.phone) ? (customer.phones?.[0]||customer.phone)+'<br>' : ''}
+        ${(customer?.emails?.[0]||customer?.email) || ''}
+      </div>
+    </div>
+    <div>
+      <div class="party-name">${vehicleName}</div>
+      <div class="party-detail">
+        ${vehicle?.vin ? 'VIN: '+vehicle.vin : ''}
+        ${vehicle?.engine ? '<br>'+vehicle.engine : ''}
+      </div>
+    </div>
+  </div>
 
-        <!-- Warranty -->
-        <div class="warranty">
-          <div class="warranty-title">Limited Warranty &amp; Disclaimer</div>
-          ${settings.warrantyText || 'Kaizen Automotive confirms that the diagnostic tests and calibration of the vehicle sensors on the vehicle were completed at the repair facility on the date stated above. Kaizen Automotive warrants that the final diagnostic tests confirm that the vehicle sensors were calibrated to perform in accordance with the specifications of the manufacturer. Kaizen Automotive does not offer any warranty or make any representation whatsoever once the vehicle leaves the repair facility.<br><br>Accuracy of replacement modules or components requiring programming, encoding, or configuration to the vehicle must be verified to "match" hardware and/or software numbers where applicable, we are not responsible for "mismatched" hardware or software that will not program to the vehicle by OEM equipment or modules/components replaced which result in similar or unforeseen concerns (additional module processing, software action, or diagnostics may be required).'}
-        </div>
+  <!-- Customer Comments -->
+  ${invoice.customerComments ? `<div class="comments-box"><div class="comments-label">Customer Comments</div>${invoice.customerComments.replace(/\n/g,'<br>')}</div>` : ''}
 
-        <!-- Substantially all services note -->
-        <p style="font-size:11px;color:#666;margin-bottom:20px;">Substantially all services include "pre" and "post" scan reports, vehicle condition and prerequisite checks, and functionality checks (which may include road-testing) for any ADAS calibrations, programming, or diagnostics.</p>
+  <!-- Service Blocks -->
+  ${serviceSectionsHtml}
 
-        <!-- Signature -->
-        <div class="signature-line">
-          <div class="sig-label">Signature</div>
-          <div class="sig-box"></div>
-        </div>
+  <!-- Bottom: Warranty + Totals side by side -->
+  <div class="bottom-wrap">
+    <div class="warranty-block">
+      <div class="warranty-title">Limited Warranty &amp; Disclaimer</div>
+      ${settings.warrantyText || warrantyDefault}
+    </div>
+    <div class="totals-box">
+      <div class="tot-row"><span>Labor</span><span>$${laborTotal.toFixed(2)}</span></div>
+      <div class="tot-row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
+      ${discAmt > 0 ? `<div class="tot-row"><span>Discount (${discPct}%)</span><span>-$${discAmt.toFixed(2)}</span></div>` : ''}
+      <div class="tot-row"><span>Shop Supplies</span><span>$${shopSupplies.toFixed(2)}</span></div>
+      <div class="tot-row"><span>EPA</span><span>$${epa.toFixed(2)}</span></div>
+      ${customer?.taxExempt ? `<div class="tot-row"><span>Tax</span><span>$0.00</span></div>` : `<div class="tot-row"><span>Tax</span><span>$${tax.toFixed(2)}</span></div>`}
+      <div class="tot-row tot-grand"><span>Grand Total</span><span>$${finalTotal.toFixed(2)}</span></div>
+      ${paidToDate > 0 ? `<div class="tot-row"><span>Paid to Date</span><span>($${paidToDate.toFixed(2)})</span></div>` : ''}
+      <div class="tot-balance"><span>REMAINING BALANCE</span><span>$${balanceAmt.toFixed(2)}</span></div>
+    </div>
+  </div>
 
-        <!-- Payments -->
-        ${paymentsTableHtml}
+  <!-- Signature -->
+  <div class="sig-section">
+    <div class="sig-label">Signature</div>
+    <div class="sig-line"></div>
+  </div>
 
-        <div class="footer">
-          ${settings.shopName} • ${settings.phone} • ${settings.email}
-        </div>
-      </body>
-      </html>
-    `);
+  <!-- Payments -->
+  ${paymentsHtml}
+
+  <!-- Authorizations -->
+  ${authHtml}
+
+  <div class="footer">Powered by ${settings.shopName} • ${settings.phone} • ${settings.email}</div>
+</body>
+</html>`);
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => printWindow.print(), 250);
@@ -3359,129 +3435,189 @@ function EstimatePage({document: initialDoc, customers, vehicles, users, setting
 
   const handlePrint = () => {
     const printWindow = window.open('', '_blank');
-    const docType = isInvoice ? 'INVOICE' : 'ESTIMATE';
-    const docNumber = doc.number;
-    
-    const itemsHtml = (doc.items || []).map(item => {
-      const itemTotal = item.type === 'labor' ? (item.hours || 0) * (item.rate || settings.laborRate) :
-                        item.type === 'part' ? (item.quantity || 1) * (item.cost || 0) :
-                        item.price || 0;
-      const details = item.type === 'labor' ? `${item.hours}h × $${item.rate || settings.laborRate}/hr` :
-                      item.type === 'part' ? `${item.quantity} × $${(item.cost || 0).toFixed(2)}` :
-                      'Flat fee';
-      const noteRow = item.customerNote ? `<tr class="item-note-row"><td colspan="4" style="padding:2px 8px 8px 8px;color:#888;font-size:11px;font-style:italic">${item.customerNote}</td></tr>` : '';
-      return `<tr>
-        <td>${item.description || 'Untitled'}</td>
-        <td style="text-transform:capitalize">${item.type}</td>
-        <td>${details}</td>
-        <td style="text-align:right">$${itemTotal.toFixed(2)}</td>
-      </tr>${noteRow}`;
-    }).join('');
+    const docLabel = isInvoice ? 'Invoice' : 'Estimate';
 
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>${docType} ${docNumber}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; padding: 40px; color: #333; max-width: 800px; margin: 0 auto; }
-          .header { display: flex; justify-content: space-between; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #E63946; }
-          .logo { font-size: 24px; font-weight: bold; color: #E63946; }
-          .doc-info { text-align: right; }
-          .doc-type { font-size: 28px; font-weight: bold; color: #333; }
-          .doc-number { font-size: 14px; color: #666; }
-          .parties { display: flex; gap: 40px; margin-bottom: 30px; }
+    // Format date helper: ISO → M/D/YYYY
+    const fmtDate = (d) => {
+      if (!d) return '';
+      if (d.includes('-')) {
+        const [y,m,day] = d.split('T')[0].split('-');
+        return `${parseInt(m)}/${parseInt(day)}/${y}`;
+      }
+      return d;
+    };
 
-          .prepared-by { font-size: 12px; color: #666; margin-bottom: 20px; margin-top: -18px; }
-          .party { flex: 1; }
-          .party-label { font-size: 12px; color: #666; text-transform: uppercase; margin-bottom: 5px; }
-          .party-name { font-size: 16px; font-weight: bold; }
-          .party-details { font-size: 14px; color: #555; }
-          .vehicle-box { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 30px; }
-          .vehicle-title { font-size: 18px; font-weight: bold; margin-bottom: 10px; }
-          .vehicle-details { display: flex; gap: 30px; font-size: 14px; }
-          .vehicle-detail span { color: #666; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-          th { background: #333; color: white; padding: 12px; text-align: left; font-size: 14px; }
-          td { padding: 12px; border-bottom: 1px solid #ddd; font-size: 14px; }
-          .totals { margin-left: auto; width: 300px; }
-          .total-row { display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px; }
-          .total-row.final { font-size: 18px; font-weight: bold; border-top: 2px solid #333; margin-top: 10px; padding-top: 15px; }
-          .comments { margin-top: 30px; padding: 15px; background: #f9f9f9; border-radius: 8px; }
-          .comments-title { font-weight: bold; margin-bottom: 10px; }
-          .comments-text { font-size: 14px; color: #555; }
-          .footer { margin-top: 40px; text-align: center; font-size: 12px; color: #666; padding-top: 20px; border-top: 1px solid #ddd; }
-          @media print { body { padding: 20px; } }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="logo">${settings.shopName}</div>
-          <div class="doc-info">
-            <div class="doc-type">${docType}</div>
-            <div class="doc-number">${docNumber}</div>
-            <div class="doc-number">Date: ${doc.createdAt}</div>
-          </div>
-        </div>
-        
-        <div class="parties">
-          <div class="party">
-            <div class="party-label">Bill To</div>
-            <div class="party-name">${customer ? getName(customer) : 'N/A'}</div>
-            <div class="party-details">${customer?.phone || ''}<br>${customer?.email || customer?.emails?.[0] || ''}</div>
-          </div>
-          <div class="party">
-            <div class="party-label">From</div>
-            <div class="party-name">${settings.shopName}</div>
-            <div class="party-details">${settings.phone}<br>${settings.email}</div>
-          </div>
-        </div>
+    const creatorName = doc.serviceWriter || users.find(u => u.id === doc.createdBy)?.name || 'Staff';
+    const payTerm = doc.paymentTerm || (isInvoice ? 'Net 45' : '');
+    const poNum = doc.poNumber || '';
+    const custAddr = customer ? [
+      customer.address,
+      [customer.city, customer.state ? customer.state + (customer.zip ? ' ' + customer.zip : '') : customer.zip].filter(Boolean).join(', ')
+    ].filter(Boolean).join(', ') : '';
+    const vehicleName = vehicle ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(' ') : (doc.vehicleStr || '');
 
-        <div class="prepared-by">Prepared by: <strong>${users.find(u => u.id === doc.createdBy)?.name || 'Staff'}</strong></div>
+    // Group items by serviceName
+    const items = doc.items || [];
+    const grouped = [];
+    const seen = new Map();
+    for (const item of items) {
+      const key = item.serviceName || item.description || 'Service';
+      if (!seen.has(key)) { seen.set(key, []); grouped.push({name: key, items: seen.get(key)}); }
+      seen.get(key).push(item);
+    }
 
-        <div class="vehicle-box">
-          <div class="vehicle-title">${vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : 'No Vehicle'}</div>
-          <div class="vehicle-details">
-            <div><span>VIN:</span> ${vehicle?.vin || 'N/A'}</div>
-            <div><span>Plate:</span> ${vehicle?.plate || 'N/A'}</div>
-            ${vehicle?.engine ? `<div><span>Engine:</span> ${vehicle.engine}</div>` : ''}
-            ${vehicle?.mileageIn != null ? `<div><span>Miles In:</span> ${vehicle.mileageIn.toLocaleString()}</div>` : ''}
-            ${vehicle?.mileageOut != null ? `<div><span>Miles Out:</span> ${vehicle.mileageOut.toLocaleString()}</div>` : ''}
-          </div>
-        </div>
+    const calcIt = (item) =>
+      item.type === 'labor' ? (item.hours||0) * (item.rate||settings.laborRate) :
+      item.type === 'part'  ? (item.quantity||1) * (item.cost||0) : (item.price||0);
 
-        <table>
-          <thead>
-            <tr>
-              <th>Description</th>
-              <th>Type</th>
-              <th>Details</th>
-              <th style="text-align:right">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml || '<tr><td colspan="4" style="text-align:center;color:#666;">No items</td></tr>'}
-          </tbody>
-        </table>
+    const serviceSectionsHtml = grouped.length > 0 ? grouped.map(grp => {
+      const grpTotal = grp.items.reduce((s, it) => s + calcIt(it), 0);
+      const rowsHtml = grp.items.map(item => {
+        const amt = calcIt(item);
+        const hrsDisplay = item.type === 'labor' ? (item.hours||0).toString() :
+                           item.type === 'part'  ? `Qty ${item.quantity||1}` : '—';
+        const labelDisplay = item.laborDescription || item.description || 'Service';
+        const typeLabel = item.type === 'labor' ? 'Labor' : item.type === 'part' ? 'Part' : 'Fee';
+        return `<tr>
+          <td class="svc-td-desc">${typeLabel}: ${labelDisplay}${item.customerNote ? `<br><span class="note">${item.customerNote}</span>` : ''}</td>
+          <td class="svc-td-hrs">${hrsDisplay}</td>
+          <td class="svc-td-amt">$${amt.toFixed(2)}</td>
+        </tr>`;
+      }).join('');
+      return `
+        <div class="svc-block">
+          <div class="svc-hdr">${grp.name}</div>
+          <table class="svc-tbl">
+            <thead><tr><th class="svc-th-desc">Description</th><th class="svc-th-hrs">HRS</th><th class="svc-th-amt">Subtotal</th></tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+          <div class="svc-subtotal">Subtotal: $${grpTotal.toFixed(2)}</div>
+        </div>`;
+    }).join('') : '<p style="color:#888;font-size:12px;margin-bottom:16px;">No items</p>';
 
-        <div class="totals">
-          <div class="total-row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
-          ${disc > 0 ? `<div class="total-row"><span>Discount (${customer?.discount}%)</span><span>-$${disc.toFixed(2)}</span></div>` : ''}
-          ${customer?.taxExempt ? `<div class="total-row" style="color:#2d936c"><span>Tax</span><span>Exempt</span></div>` : `<div class="total-row"><span>Tax (${settings.taxRate}%)</span><span>$${tax.toFixed(2)}</span></div>`}
-          <div class="total-row final"><span>Total</span><span>$${total.toFixed(2)}</span></div>
-        </div>
+    const shopSupplies = doc.shopSupplies || 0;
+    const epa = doc.epa || 0;
+    const balanceColor = balance > 0 ? '#c0392b' : '#27ae60';
+    const laborTotal = doc.laborTotal || subtotal;
 
-        ${doc.customerComments ? `<div class="comments"><div class="comments-title">Customer Comments</div><div class="comments-text">${doc.customerComments}</div></div>` : ''}
-        ${doc.recommendations ? `<div class="comments"><div class="comments-title">Recommendations</div><div class="comments-text">${doc.recommendations}</div></div>` : ''}
+    const warrantyDefault = `${settings.shopName} certifies that diagnostic tests and calibration of the vehicle's sensors were completed at the repair facility on the date indicated above. ${settings.shopName} guarantees that the final diagnostic tests confirm the vehicle's sensors were calibrated to meet the manufacturer's specifications. However, ${settings.shopName} does not provide any warranty or make any assurances once the vehicle departs from the repair facility.`;
 
-        <div class="footer">
-          Thank you for your business!<br>
-          ${settings.shopName} • ${settings.phone} • ${settings.email}
-        </div>
-      </body>
-      </html>
-    `);
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <title>${docLabel} #${doc.number}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #222; max-width: 820px; margin: 0 auto; padding: 32px; }
+    .hdr { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; }
+    .hdr-left .shop-name { font-size:16px; font-weight:bold; color:#111; }
+    .hdr-left .shop-contact { font-size:11px; color:#555; margin-top:3px; line-height:1.6; }
+    .hdr-right { text-align:right; }
+    .hdr-right .doc-num { font-size:20px; font-weight:bold; color:#111; }
+    .hdr-right .doc-meta { font-size:11px; color:#444; line-height:1.8; margin-top:4px; }
+    .divider { border:none; border-top:1px solid #ddd; margin:16px 0; }
+    .parties { display:flex; gap:40px; margin-bottom:16px; }
+    .party-name { font-size:14px; font-weight:bold; color:#111; margin-bottom:2px; }
+    .party-detail { font-size:11px; color:#555; line-height:1.6; }
+    .comments-box { margin-bottom:16px; font-size:12px; color:#444; }
+    .comments-label { font-weight:bold; font-size:11px; margin-bottom:4px; }
+    .svc-block { margin-bottom:14px; }
+    .svc-hdr { font-size:13px; font-weight:bold; color:#333; padding:7px 0; }
+    .svc-tbl { width:100%; border-collapse:collapse; }
+    .svc-tbl th { font-size:10px; text-transform:uppercase; color:#666; padding:5px 0; border-bottom:1px solid #ddd; }
+    .svc-th-desc { text-align:left; }
+    .svc-th-hrs, .svc-th-amt { text-align:right; width:70px; }
+    .svc-tbl td { padding:7px 0; font-size:12px; border-bottom:1px solid #f0f0f0; vertical-align:top; }
+    .svc-td-hrs, .svc-td-amt { text-align:right; }
+    .svc-subtotal { text-align:right; font-size:11px; color:#555; padding:5px 0 10px; border-top:1px solid #ddd; }
+    .note { font-size:10px; color:#888; font-style:italic; }
+    .bottom-wrap { display:flex; gap:24px; align-items:flex-start; margin-top:8px; margin-bottom:20px; }
+    .warranty-block { flex:1; font-size:10px; color:#555; line-height:1.6; }
+    .warranty-title { font-weight:bold; font-size:11px; color:#333; margin-bottom:6px; }
+    .totals-box { width:260px; flex-shrink:0; }
+    .tot-row { display:flex; justify-content:space-between; padding:5px 0; font-size:12px; border-bottom:1px solid #f0f0f0; }
+    .tot-row:last-child { border-bottom:none; }
+    .tot-grand { font-weight:bold; font-size:13px; }
+    .tot-balance { font-weight:bold; font-size:14px; color:${balanceColor}; border-top:2px solid #ddd; margin-top:4px; padding-top:6px; }
+    .sig-section { margin-bottom:20px; }
+    .sig-label { font-size:12px; font-weight:bold; margin-bottom:8px; }
+    .sig-line { border-bottom:1px solid #333; width:280px; height:28px; }
+    .footer { text-align:center; font-size:10px; color:#999; padding-top:14px; border-top:1px solid #ddd; }
+    @media print { body { padding:20px; } }
+  </style>
+</head>
+<body>
+  <div class="hdr">
+    <div class="hdr-left">
+      <div class="shop-name">${settings.shopName}</div>
+      <div class="shop-contact">${settings.phone ? settings.phone+'<br>' : ''}${settings.email || ''}</div>
+    </div>
+    <div class="hdr-right">
+      <div class="doc-num">${docLabel} #${doc.number}</div>
+      <div class="doc-meta">
+        ${doc.createdAt ? `<div>Created: ${fmtDate(doc.createdAt)}</div>` : ''}
+        ${doc.completedAt ? `<div>Completed: ${fmtDate(doc.completedAt)}</div>` : ''}
+        ${(doc.invoicedAt||doc.convertedAt) ? `<div>Invoiced: ${fmtDate(doc.invoicedAt||doc.convertedAt)}</div>` : ''}
+        ${payTerm ? `<div>Payment Term: ${payTerm}</div>` : ''}
+        ${doc.dueAt ? `<div>Payment Due: ${fmtDate(doc.dueAt)}</div>` : ''}
+        <div>Service Writer: ${creatorName}</div>
+        ${poNum ? `<div>PO #: ${poNum}</div>` : ''}
+      </div>
+    </div>
+  </div>
+  <hr class="divider">
+
+  <div class="parties">
+    <div>
+      <div class="party-name">${customer ? getName(customer) : 'Customer'}</div>
+      <div class="party-detail">
+        ${custAddr ? custAddr+'<br>' : ''}
+        ${(customer?.phones?.[0]||customer?.phone) ? (customer.phones?.[0]||customer.phone)+'<br>' : ''}
+        ${(customer?.emails?.[0]||customer?.email) || ''}
+      </div>
+    </div>
+    <div>
+      <div class="party-name">${vehicleName}</div>
+      <div class="party-detail">
+        ${vehicle?.vin ? 'VIN: '+vehicle.vin : ''}
+        ${vehicle?.engine ? '<br>'+vehicle.engine : ''}
+        ${vehicle?.plate ? '<br>Plate: '+vehicle.plate : ''}
+      </div>
+    </div>
+  </div>
+
+  ${doc.customerComments ? `<div class="comments-box"><div class="comments-label">Customer Comments</div>${doc.customerComments.replace(/\n/g,'<br>')}</div>` : ''}
+
+  ${serviceSectionsHtml}
+
+  <div class="bottom-wrap">
+    <div class="warranty-block">
+      <div class="warranty-title">Limited Warranty &amp; Disclaimer</div>
+      ${settings.warrantyText || warrantyDefault}
+    </div>
+    <div class="totals-box">
+      <div class="tot-row"><span>Labor</span><span>$${laborTotal.toFixed(2)}</span></div>
+      <div class="tot-row"><span>Subtotal</span><span>$${subtotal.toFixed(2)}</span></div>
+      ${disc > 0 ? `<div class="tot-row"><span>Discount (${customer?.discount}%)</span><span>-$${disc.toFixed(2)}</span></div>` : ''}
+      <div class="tot-row"><span>Shop Supplies</span><span>$${shopSupplies.toFixed(2)}</span></div>
+      <div class="tot-row"><span>EPA</span><span>$${epa.toFixed(2)}</span></div>
+      ${customer?.taxExempt ? `<div class="tot-row"><span>Tax</span><span>$0.00</span></div>` : `<div class="tot-row"><span>Tax</span><span>$${tax.toFixed(2)}</span></div>`}
+      <div class="tot-row tot-grand"><span>Grand Total</span><span>$${total.toFixed(2)}</span></div>
+      ${isInvoice && totalPaid > 0 ? `<div class="tot-row"><span>Paid to Date</span><span>($${totalPaid.toFixed(2)})</span></div>` : ''}
+      ${isInvoice ? `<div class="tot-balance"><span>REMAINING BALANCE</span><span>$${balance.toFixed(2)}</span></div>` : ''}
+    </div>
+  </div>
+
+  <div class="sig-section">
+    <div class="sig-label">Signature</div>
+    <div class="sig-line"></div>
+  </div>
+
+  ${doc.recommendations ? `<div style="margin-bottom:16px;font-size:12px;"><strong>Recommendations:</strong><br>${doc.recommendations.replace(/\n/g,'<br>')}</div>` : ''}
+
+  <div class="footer">Powered by ${settings.shopName} • ${settings.phone} • ${settings.email}</div>
+</body>
+</html>`);
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => printWindow.print(), 250);
