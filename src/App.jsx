@@ -760,7 +760,7 @@ export default function App() {
       </main>
 
       {modal==='custAdd'    && <CustomerForm onClose={closeModal} onSave={c=>{handleAddCustomer(c);closeModal();notify('Customer added');}}/>}
-      {modal==='custDetail' && selected && <CustomerDetail customer={selected} vehicles={vehicles.filter(v=>v.customerId===selected.id)} invoices={invoices.filter(i=>i.customerId===selected.id)} getName={getName} onClose={closeModal} onOpenInvoice={inv=>{setSelected(inv);setModal('invDetail');}}/>}
+      {modal==='custDetail' && selected && <CustomerDetail customer={selected} vehicles={vehicles.filter(v=>v.customerId===selected.id)} invoices={invoices.filter(i=>i.customerId===selected.id)} getName={getName} onClose={closeModal} onOpenInvoice={inv=>{closeModal();setEditingEstimate(inv);}}/>}
       {modal==='vehAdd'     && <VehicleForm customers={sorted} getName={getName} onClose={closeModal} onSave={v=>{handleAddVehicle(v);closeModal();notify('Vehicle added');}} notify={notify}/>}
       {modal==='invDetail'  && selected && <InvoiceDetail invoice={selected} customer={customers.find(c=>c.id===selected.customerId)} vehicle={vehicles.find(v=>v.id===selected.vehicleId)} settings={settings} users={users} getName={getName} onClose={closeModal} onRevert={()=>{handleRevertToEstimate(selected);closeModal();}} onPay={p=>{const upd={...selected,payments:[...(selected.payments||[]),p],balance:selected.balance-p.amount,status:selected.balance-p.amount<=0?'paid':'partial'};setInvoices(invoices.map(i=>i.id===selected.id?upd:i));setSelected(upd);notify('Payment recorded');}}/>}
     </div>
@@ -929,7 +929,6 @@ function EstimatesList({estimates,customers,vehicles,locations,getName,onSelect,
 }
 
 function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,onBulkDelete,onArchive}) {
-  const [pickedId, setPickedId] = useState(null);
   const [sortDir, setSortDir] = useState('desc');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selected, setSelected] = useState(new Set());
@@ -940,71 +939,16 @@ function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,on
   const archivedInvoices = invoices.filter(i =>  i.archived);
   const pool = showArchived ? archivedInvoices : activeInvoices;
 
-  const customerHasInvoice = new Set(pool.map(i => i.customerId).filter(Boolean));
-  const withInvoices = customers.filter(c => customerHasInvoice.has(c.id));
-  const unlinked = pool.filter(i => !i.customerId);
-
   const getLocName = id => locations?.find(l => l.id === id)?.name || '';
   const showLoc = locations?.length > 1;
 
-  // ── Customer picker ─────────────────────────────────────────
-  if (!pickedId) {
-    const filtered = search
-      ? withInvoices.filter(c => getName(c).toLowerCase().includes(search.toLowerCase()))
-      : withInvoices;
-    const sorted = [...filtered].sort((a,b) => getName(a).localeCompare(getName(b)));
-    return (
-      <div>
-        <div className="kf-inv-pick-header">
-          <h2>Invoices</h2>
-          <input className="kf-search-input" placeholder="Search customers…" value={search} onChange={e=>setSearch(e.target.value)}/>
-          <button
-            className={`kf-btn secondary sm${showArchived?' active':''}`}
-            onClick={()=>{setShowArchived(v=>!v);setSearch('');}}
-          >
-            <Archive size={14}/>{showArchived ? 'Active' : `Archived (${archivedInvoices.length})`}
-          </button>
-        </div>
-        {showArchived && <div className="kf-archive-notice"><Archive size={14}/> Showing archived invoices.</div>}
-        <div className="kf-inv-customer-grid">
-          {sorted.map(c => {
-            const cinvs = pool.filter(i => i.customerId === c.id);
-            const unpaid = cinvs.filter(i => i.status !== 'paid');
-            const total  = cinvs.reduce((s,i) => s + (i.finalTotal||i.total||0), 0);
-            return (
-              <div key={c.id} className="kf-inv-customer-card" onClick={() => { setPickedId(c.id); setSelected(new Set()); }}>
-                <div className="kf-inv-card-name">{getName(c)}</div>
-                <div className="kf-inv-card-meta">
-                  <span>{cinvs.length} invoice{cinvs.length!==1?'s':''}</span>
-                  {unpaid.length>0&&<span className="red">{unpaid.length} unpaid</span>}
-                  <span className="kf-inv-card-total">${total.toFixed(2)}</span>
-                </div>
-              </div>
-            );
-          })}
-          {unlinked.length>0&&(
-            <div className="kf-inv-customer-card unlinked" onClick={()=>{setPickedId('__unlinked__');setSelected(new Set());}}>
-              <div className="kf-inv-card-name">⚠ Unlinked Invoices</div>
-              <div className="kf-inv-card-meta">
-                <span>{unlinked.length} invoice{unlinked.length!==1?'s':''}</span>
-                <span className="kf-sub">No customer assigned</span>
-              </div>
-            </div>
-          )}
-          {sorted.length===0&&unlinked.length===0&&(
-            <div className="kf-empty"><DollarSign size={40}/><p>{showArchived?'No archived invoices':'No invoices yet'}</p></div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Invoice list ─────────────────────────────────────────────
-  const customer = pickedId==='__unlinked__' ? null : customers.find(c=>c.id===pickedId);
-  const base = (pickedId==='__unlinked__' ? pool.filter(i=>!i.customerId) : pool.filter(i=>i.customerId===pickedId))
-    .filter(i => statusFilter==='all' || i.status===statusFilter);
-
   const parseNum = n => parseInt((n||'').replace(/\D/g,''))||0;
+
+  const base = pool
+    .filter(i => statusFilter==='all' || i.status===statusFilter)
+    .filter(i => !search || (i.number||'').toLowerCase().includes(search.toLowerCase()) ||
+      getName(customers.find(c=>c.id===i.customerId)).toLowerCase().includes(search.toLowerCase()));
+
   const list = [...base].sort((a,b) =>
     sortDir==='asc' ? parseNum(a.number)-parseNum(b.number) : parseNum(b.number)-parseNum(a.number)
   );
@@ -1021,13 +965,9 @@ function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,on
   return (
     <div>
       <div className="kf-inv-list-header">
-        <button className="kf-btn secondary sm" onClick={()=>{setPickedId(null);setSelected(new Set());setSearch('');}}>
-          <ArrowLeft size={14}/> All Customers
-        </button>
         <div className="kf-inv-list-title">
-          <strong>{customer?getName(customer):'Unlinked Invoices'}</strong>
-          <span className="kf-sub">{list.length} invoice{list.length!==1?'s':''}</span>
-          {showArchived && <span className="kf-badge" style={{background:'#b8860b22',color:'#b8860b'}}>Archived</span>}
+          <strong>Invoices</strong>
+          <span className="kf-sub">{list.length} invoice{list.length!==1?'s':''}{showArchived?' (archived)':''}</span>
         </div>
         <div className="kf-inv-list-stats">
           <span>Total: <strong>${grandTotal.toFixed(2)}</strong></span>
@@ -1036,6 +976,7 @@ function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,on
       </div>
 
       <div className="kf-actions" style={{marginBottom:8}}>
+        <input className="kf-search-input" placeholder="Search by invoice # or customer…" value={search} onChange={e=>setSearch(e.target.value)} style={{maxWidth:280}}/>
         <div style={{flex:1}}>
           {selected.size>0 ? (
             <div className="kf-bulk-bar">
@@ -1046,10 +987,16 @@ function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,on
             </div>
           ) : (
             <button className="kf-btn secondary sm kf-sort-toggle" onClick={()=>setSortDir(d=>d==='desc'?'asc':'desc')}>
-              {sortDir==='desc'?<><ArrowDown size={14}/> Highest First</>:<><ArrowUp size={14}/> Lowest First</>}
+              {sortDir==='desc'?<><ArrowDown size={14}/> Newest First</>:<><ArrowUp size={14}/> Oldest First</>}
             </button>
           )}
         </div>
+        <button
+          className={`kf-btn secondary sm${showArchived?' active':''}`}
+          onClick={()=>{setShowArchived(v=>!v);setSearch('');setSelected(new Set());}}
+        >
+          <Archive size={14}/>{showArchived ? 'Active' : `Archived (${archivedInvoices.length})`}
+        </button>
         <div className="kf-tabs">
           {['all','unpaid','partial','paid'].map(f=><button key={f} className={statusFilter===f?'active':''} onClick={()=>setStatusFilter(f)}>{f}</button>)}
         </div>
@@ -1058,24 +1005,27 @@ function InvoicesList({invoices,customers,locations,getName,onSelect,onDelete,on
       <div className="kf-card">
         <table><thead><tr>
           <th style={{width:36}}><input type="checkbox" checked={allChecked} onChange={toggleAll}/></th>
-          <th>Invoice #</th>{showLoc&&<th>Location</th>}<th>Date</th><th>Total</th><th>Balance</th><th>Status</th><th></th>
+          <th>Invoice #</th><th>Customer</th>{showLoc&&<th>Location</th>}<th>Date</th><th>Total</th><th>Balance</th><th>Status</th><th></th>
         </tr></thead>
-        <tbody>{list.map(i=>(
+        <tbody>{list.map(i=>{
+          const cust = customers.find(c=>c.id===i.customerId);
+          return (
           <tr key={i.id} className={selected.has(i.id)?'kf-row-selected':i.archived?'kf-row-archived':''}>
             <td onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selected.has(i.id)} onChange={()=>toggle(i.id)}/></td>
             <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><strong>{i.number || (i.invoiceNumber ? `INV-${i.invoiceNumber}` : '—')}</strong></td>
+            <td onClick={()=>onSelect(i)} style={{cursor:'pointer',color:'var(--muted,#94a3b8)',fontSize:13}}>{cust?getName(cust):'—'}</td>
             {showLoc&&<td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className="kf-loc-tag"><MapPin size={11}/>{getLocName(i.locationId)}</span></td>}
             <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className="kf-sub">{i.createdAt?.split('T')[0]||i.convertedAt?.split('T')[0]||'—'}</td>
             <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}>${(i.finalTotal||i.total||0).toFixed(2)}</td>
-            <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className={(i.balance||0)>0?'red':'green'}>${(i.balance||0).toFixed(2)}</td>
+            <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}} className={(i.balance||0)>0?'red':''}>${(i.balance||0).toFixed(2)}</td>
             <td onClick={()=>onSelect(i)} style={{cursor:'pointer'}}><span className={`kf-badge ${i.status}`}>{i.status}</span></td>
             <td style={{display:'flex',gap:4}}>
               <button className="kf-icon-btn secondary" onClick={ev=>{ev.stopPropagation();onArchive([i.id],!i.archived);}} title={i.archived?'Unarchive':'Archive'}>{i.archived?<ArchiveRestore size={15}/>:<Archive size={15}/>}</button>
               <button className="kf-icon-btn danger"    onClick={ev=>{ev.stopPropagation();onDelete(i);}} title="Delete"><Trash2 size={15}/></button>
             </td>
           </tr>
-        ))}</tbody></table>
-        {list.length===0&&<div className="kf-empty"><DollarSign size={40}/></div>}
+        );})}</tbody></table>
+        {list.length===0&&<div className="kf-empty"><DollarSign size={40}/><p>{showArchived?'No archived invoices':'No invoices yet'}</p></div>}
       </div>
     </div>
   );
@@ -2186,7 +2136,7 @@ function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOp
   const totalPaid   = invoices.reduce((s,i)=>s+(i.payments||[]).reduce((a,p)=>a+p.amount,0),0);
   const totalOwed   = invoices.reduce((s,i)=>s+(i.balance||0),0);
 
-  const statusColor = s => s==='paid'?'#22c55e':s==='partial'?'#f59e0b':s==='overdue'?'#ef4444':'#6b7280';
+  const statusColor = s => s==='paid'?'#dc143c':s==='partial'?'#f59e0b':s==='overdue'?'#ef4444':'#6b7280';
 
   // Statements: group invoices by month
   const statements = invoices.reduce((acc,inv)=>{
@@ -2223,8 +2173,8 @@ function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOp
           <div style={{display:'flex',gap:24,paddingBottom:16}}>
             {[
               {label:'Total Billed', val:`$${totalBilled.toFixed(2)}`},
-              {label:'Total Paid',   val:`$${totalPaid.toFixed(2)}`,  color:'#22c55e'},
-              {label:'Balance Due',  val:`$${totalOwed.toFixed(2)}`,  color:totalOwed>0?'#ef4444':'#22c55e'},
+              {label:'Total Paid',   val:`$${totalPaid.toFixed(2)}`,  color:'#dc143c'},
+              {label:'Balance Due',  val:`$${totalOwed.toFixed(2)}`,  color:totalOwed>0?'#ef4444':'#dc143c'},
               {label:'Vehicles',     val:vehicles.length},
               {label:'Orders',       val:invoices.length},
             ].map(s=>(
@@ -2238,7 +2188,7 @@ function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOp
           {/* Tabs */}
           <div style={{display:'flex',gap:0,marginBottom:-1}}>
             {['orders','statements'].map(t=>(
-              <button key={t} onClick={()=>setTab(t)} style={{padding:'8px 20px',background:'none',border:'none',borderBottom:tab===t?'2px solid #22c55e':'2px solid transparent',color:tab===t?'#22c55e':'var(--muted,#64748b)',fontWeight:tab===t?600:400,fontSize:13,cursor:'pointer',textTransform:'capitalize',transition:'all .15s'}}>
+              <button key={t} onClick={()=>setTab(t)} style={{padding:'8px 20px',background:'none',border:'none',borderBottom:tab===t?'2px solid #dc143c':'2px solid transparent',color:tab===t?'#dc143c':'var(--muted,#64748b)',fontWeight:tab===t?600:400,fontSize:13,cursor:'pointer',textTransform:'capitalize',transition:'all .15s'}}>
                 {t==='orders'?`Orders (${invoices.length})`:'Statements'}
               </button>
             ))}
@@ -2265,7 +2215,7 @@ function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOp
                         <tr key={inv.id} onClick={()=>onOpenInvoice&&onOpenInvoice(inv)} style={{borderBottom:'1px solid rgba(255,255,255,0.04)',cursor:'pointer',transition:'background .1s'}}
                           onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.03)'}
                           onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                          <td style={{padding:'12px 8px',fontSize:13,fontWeight:600,color:'#22c55e'}}>{inv.number||`INV-${inv.invoiceNumber||inv.id?.slice(-6)}`}</td>
+                          <td style={{padding:'12px 8px',fontSize:13,fontWeight:600,color:'#dc143c'}}>{inv.number||`INV-${inv.invoiceNumber||inv.id?.slice(-6)}`}</td>
                           <td style={{padding:'12px 8px',fontSize:13,color:'var(--muted,#94a3b8)'}}>{inv.createdAt?new Date(inv.createdAt).toLocaleDateString():inv.date||'—'}</td>
                           <td style={{padding:'12px 8px',fontSize:13,color:'var(--text,#f1f5f9)'}}>{veh?[veh.year,veh.make,veh.model].filter(Boolean).join(' ')||inv.vehicleStr||'—':inv.vehicleStr||'—'}</td>
                           <td style={{padding:'12px 8px',fontSize:12,color:'var(--muted,#94a3b8)',fontFamily:'monospace'}}>{veh?.vin||'—'}</td>
@@ -2289,8 +2239,8 @@ function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOp
                       <span style={{fontSize:13,fontWeight:700,color:'var(--text,#f1f5f9)'}}>{stmt.month}</span>
                       <div style={{display:'flex',gap:20,fontSize:12,color:'var(--muted,#64748b)'}}>
                         <span>Billed: <strong style={{color:'var(--text,#f1f5f9)'}}>${stmt.total.toFixed(2)}</strong></span>
-                        <span>Paid: <strong style={{color:'#22c55e'}}>${stmt.paid.toFixed(2)}</strong></span>
-                        <span>Owed: <strong style={{color:stmt.total-stmt.paid>0?'#ef4444':'#22c55e'}}>${(stmt.total-stmt.paid).toFixed(2)}</strong></span>
+                        <span>Paid: <strong style={{color:'#dc143c'}}>${stmt.paid.toFixed(2)}</strong></span>
+                        <span>Owed: <strong style={{color:stmt.total-stmt.paid>0?'#ef4444':'#dc143c'}}>${(stmt.total-stmt.paid).toFixed(2)}</strong></span>
                       </div>
                     </div>
                     {stmt.invoices.map(inv=>(
@@ -2298,7 +2248,7 @@ function CustomerDetail({customer, vehicles, invoices=[], getName, onClose, onOp
                         onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.06)'}
                         onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.03)'}>
                         <div style={{display:'flex',gap:12,alignItems:'center'}}>
-                          <span style={{fontSize:13,fontWeight:600,color:'#22c55e'}}>{inv.number||`INV-${inv.invoiceNumber||inv.id?.slice(-6)}`}</span>
+                          <span style={{fontSize:13,fontWeight:600,color:'#dc143c'}}>{inv.number||`INV-${inv.invoiceNumber||inv.id?.slice(-6)}`}</span>
                           <span style={{fontSize:12,color:'var(--muted,#94a3b8)'}}>{inv.createdAt?new Date(inv.createdAt).toLocaleDateString():inv.date||''}</span>
                         </div>
                         <div style={{display:'flex',gap:16,alignItems:'center'}}>
